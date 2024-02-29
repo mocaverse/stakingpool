@@ -75,3 +75,13 @@ realm points?
 
 - don't update multiplier on unstake?
 - has no material impact on other vaults or allocPoints
+
+
+## TODO
+
+- gas-less txns. create some kind of blocker so that userA cannot call functions on userB, like stake,create, etc
+- cos fns work on onBehalf
+- nft tokenID tracking
+- max limits on staking tokens
+- max limits on staking nfts
+- rp check on creation

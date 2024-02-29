@@ -128,41 +128,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         emit DistributionUpdated(pool_.emissisonPerSecond, endTime);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                          BATCHING AND PERMIT
-    //////////////////////////////////////////////////////////////*/
 
-    /// @dev Allows batched call to self (this contract).
-    /// @param calls An array of inputs for each call.
-    function batch(bytes[] calldata calls) external payable returns (bytes[] memory results) {
-        results = new bytes[](calls.length);
-
-        for (uint256 i; i < calls.length; i++) {
-
-            (bool success, bytes memory result) = address(this).delegatecall(calls[i]);
-            if (!success) revert(RevertMsgExtractor.getRevertMsg(result));
-            results[i] = result;
-        }
-    }
-
-/*
-    /// @dev Execute an ERC2612 permit for the selected token
-    // https://www.trust-security.xyz/post/permission-denied
-    function forwardPermit(address owner, address spender, uint256 amount, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external payable {
-        
-        // Try permit() before allowance check to advance nonce if possible
-        try STAKED_TOKEN.permit(owner, spender, amount, deadline, v, r, s) {
-            return;
-        } catch {
-            //Permit potentially got frontran. COntinue anyways if allowance is insufficient
-            if (STAKED_TOKEN.allowance(owner, spender) >= amount) {
-                return;
-            }
-        } 
-
-        revert("Permit failure");
-    }
-*/
     /*//////////////////////////////////////////////////////////////
                                 EXTERNAL
     //////////////////////////////////////////////////////////////*/
@@ -171,7 +137,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     function createFreeVault() external {   }
 
     ///@dev creates empty vault
-    function createVault(address onBehalfOf, uint8 salt, DataTypes.VaultDuration duration, uint256 creatorFee, uint256 nftFee) external whenStarted whenNotPaused {
+    function createVault(address onBehalfOf, uint8 salt, DataTypes.VaultDuration duration, uint256 creatorFee, uint256 nftFee) external whenStarted whenNotPaused onlyOwner {
         //note: rp check
 
         // invalid selection
@@ -215,7 +181,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         emit VaultCreated(onBehalfOf, vaultId, vaultEndTime, duration); //emit totaLAllocPpoints updated?
     }  
 
-    function stakeTokens(bytes32 vaultId, address onBehalfOf, uint256 amount) external whenStarted whenNotPaused {
+    function stakeTokens(bytes32 vaultId, address onBehalfOf, uint256 amount) external whenStarted whenNotPaused onlyOwner {
         // usual blah blah checks
         require(amount > 0, "Invalid amount");
         require(vaultId > 0, "Invalid vaultId");
@@ -265,7 +231,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         STAKED_TOKEN.safeTransferFrom(onBehalfOf, address(this), amount);
     }
 
-    function stakeNfts(bytes32 vaultId, address onBehalfOf, uint256 amount) external whenStarted whenNotPaused {
+    function stakeNfts(bytes32 vaultId, address onBehalfOf, uint256 amount) external whenStarted whenNotPaused onlyOwner {
         // usual blah blah checks
         require(amount > 0, "Invalid amount");
         require(vaultId > 0, "Invalid vaultId");
@@ -316,7 +282,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         LOCKED_NFT_TOKEN.safeTransferFrom(onBehalfOf, address(this), amount);
     }
 
-    function claimRewards(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused {
+    function claimRewards(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused onlyOwner {
         // usual blah blah checks
         require(vaultId > 0, "Invalid vaultId");
 
@@ -341,7 +307,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         REWARDS_VAULT.payRewards(onBehalfOf, totalUnclaimedRewards);
     }
 
-    function claimFees(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused {
+    function claimFees(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused onlyOwner {
         // usual blah blah checks
         require(vaultId > 0, "Invalid vaultId");
 
@@ -386,7 +352,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         REWARDS_VAULT.payRewards(onBehalfOf, totalUnclaimedRewards);
     } 
 
-    function unstakeAll(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused {
+    function unstakeAll(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused onlyOwner {
         // usual blah blah checks
         require(vaultId > 0, "Invalid vaultId");
 
@@ -454,7 +420,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     }
 
     ///@notice Only allowed to reduce the creator fee factor
-    function updateCreatorFee(bytes32 vaultId, address onBehalfOf, uint256 newCreatorFeeFactor) external whenStarted whenNotPaused {
+    function updateCreatorFee(bytes32 vaultId, address onBehalfOf, uint256 newCreatorFeeFactor) external whenStarted whenNotPaused onlyOwner {
 
         // get vault + check if has been created
        (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
@@ -485,7 +451,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
     ///@notice Only allowed to increase the nft fee factor
     ///@dev Creator decrements the totalNftFeeFactor, which is dividied up btw the various nft stakers
-    function updateNftFee(bytes32 vaultId, address onBehalfOf, uint256 newNftFeeFactor) external whenStarted whenNotPaused {
+    function updateNftFee(bytes32 vaultId, address onBehalfOf, uint256 newNftFeeFactor) external whenStarted whenNotPaused onlyOwner {
 
         // get vault + check if has been created
        (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
@@ -734,7 +700,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
      *      Nothing to be updated. Freeze as is.
             Enables emergencyExit() to be called.
      */
-    function freeze() external onlyOwner whenPaused {
+    function freeze() external whenPaused onlyOwner {
         require(isFrozen == false, "Pool is frozen");
         
         isFrozen = true;
@@ -788,7 +754,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
      * @param vaultId Address of token contract
      * @param onBehalfOf Recepient of tokens
      */
-    function emergencyExit(bytes32 vaultId, address onBehalfOf) external whenStarted whenPaused {
+    function emergencyExit(bytes32 vaultId, address onBehalfOf) external whenStarted whenPaused onlyOwner {
         require(isFrozen = true, "Pool not frozen");
 
         // usual blah blah checks
@@ -842,7 +808,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
      * @param receiver Recepient of tokens
      * @param amount Amount to retrieve
      */
-    function recoverERC20(address tokenAddress, address receiver, uint256 amount) external onlyOwner whenPaused {
+    function recoverERC20(address tokenAddress, address receiver, uint256 amount) external whenPaused onlyOwner {
         emit RecoveredTokens(tokenAddress, receiver, amount);
 
         IERC20(tokenAddress).safeTransfer(receiver, amount);
