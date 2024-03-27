@@ -231,6 +231,9 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         STAKED_TOKEN.safeTransferFrom(onBehalfOf, address(this), amount);
     }
 
+        
+            // Note: reset NFT assoc via recordUnstake()
+            // else users cannot switch nfts to the new pool.
     function stakeNfts(bytes32 vaultId, address onBehalfOf, uint256 amount) external whenStarted whenNotPaused onlyOwner {
         // usual blah blah checks
         require(amount > 0, "Invalid amount");
@@ -778,7 +781,10 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         if(stakedNfts > 0){
             vault.stakedNfts -= stakedNfts;
             userInfo.stakedNfts -= stakedNfts;
-            
+        
+            // Note: reset NFT assoc via recordUnstake()
+            // else users cannot switch nfts to the new pool.
+        
             //_burn NFT chips?
             emit UnstakedMocaNft(onBehalfOf, vaultId, stakedNfts);       
         }
@@ -792,12 +798,11 @@ contract Pool is ERC20, Pausable, Ownable2Step {
             emit UnstakedMoca(onBehalfOf, vaultId, stakedTokens);       
         }
 
-        // update storage
+        // update storage 
         vaults[vaultId] = vault;
         users[onBehalfOf][vaultId] = userInfo;
 
         // return principal MOCA + NFT chip
-        if(stakedNfts > 0) LOCKED_NFT_TOKEN.safeTransfer(onBehalfOf, stakedNfts);
         if(stakedTokens > 0) STAKED_TOKEN.safeTransfer(onBehalfOf, stakedTokens); 
     }
 
