@@ -15,13 +15,14 @@ import {Ownable2Step, Ownable} from  "openzeppelin-contracts/contracts/access/Ow
 // interfaces
 import {IRegistry} from "./interfaces/IRegistry.sol";
 import {IRewardsVault} from "./interfaces/IRewardsVault.sol";
+import {IMocaPoints} from "./interfaces/IMocaPoints.sol";
 
 //Note: inherit ERC20 to issue stkMOCA
 contract Pool is ERC20, Pausable, Ownable2Step { 
     using SafeERC20 for IERC20;
 
     // rp contract interfaces, token interfaces,
-    address public immutable REALM_POINTS;
+    IMocaPoints public immutable REALM_POINTS;
     IRegistry public immutable REGISTRY;
     IERC20 public immutable STAKED_TOKEN;  
     
@@ -81,6 +82,8 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     event RecoveredTokens(address indexed token, address indexed target, uint256 indexed amount);
     event PoolFrozen(uint256 indexed timestamp);
 
+    event VaultStakingLimitIncreased(bytes32 indexed vaultId, uint256 oldStakingLimit, uint256 indexed newStakingLimit);
+
 
 //-------------------------------mappings-------------------------------------------
 
@@ -105,7 +108,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         STAKED_TOKEN = stakedToken;
         REWARD_TOKEN = rewardToken;
 
-        REALM_POINTS = realmPoints;
+        REALM_POINTS = IMocaPoints(realmPoints);
         REWARDS_VAULT = IRewardsVault(rewardsVault);
         REGISTRY = IRegistry(registry);
 
@@ -135,11 +138,17 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     //////////////////////////////////////////////////////////////*/
 
     ///@dev create empty vault, without need for RP
-    function createFreeVault() external {   }
+    function createFreeVault() external whenStarted whenNotPaused onlyOwner {}
 
     ///@dev creates empty vault
     function createVault(address onBehalfOf, uint8 salt, DataTypes.VaultDuration duration, uint256 creatorFee, uint256 nftFee) external whenStarted whenNotPaused onlyOwner {
-        //note: rp check
+        //note: rp check + call consume
+        //note: placeholder
+        REALM_POINTS.balanceOf({season: hex'01', realmId: 1});
+        
+        // calc. vault limit based on RP. note: placeholder
+        // revert if MAX_MOCA_PER_VAULT exceeded
+        uint256 stakedTokensLimit;
 
         // invalid selection
         if(uint8(duration) == 0) revert Errors.InvalidVaultPeriod();      
@@ -166,7 +175,8 @@ contract Pool is ERC20, Pausable, Ownable2Step {
             vault.duration = duration;
             vault.endTime = vaultEndTime; 
             vault.multiplier = uint8(duration); 
-            vault.allocPoints = vaultAllocPoints;        // vaultAllocPoints: 30:1, 60:2, 90:3
+            vault.allocPoints = vaultAllocPoints;                             // vaultAllocPoints: 30:1, 60:2, 90:3
+            vault.stakedTokensLimit = stakedTokensLimit;                      //note: placeholder
             
             // index
             vault.accounting.vaultIndex = pool_.poolIndex;
@@ -196,7 +206,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         // if vault matured, revert
         if(vault.endTime <= block.timestamp) revert Errors.VaultMatured(vaultId);
         // if staking limit exceeded, revert
-        if((vault.stakedTokens + amount) > MAX_MOCA_PER_VAULT) revert Errors.TokenStakingLimitExceeded(vaultId, vault.stakedTokens);
+        if((vault.stakedTokens + amount) > MAX_MOCA_PER_VAULT) revert Errors.StakedTokenLimitExceeded(vaultId, vault.stakedTokens);
 
         // calc. allocPoints
         uint256 incomingAllocPoints = (amount * vault.multiplier);
@@ -422,16 +432,37 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         if(stakedTokens > 0) STAKED_TOKEN.safeTransfer(onBehalfOf, stakedTokens); 
     }
 
-    
-    ///@dev to prevent index drift. Called by off-chain script
-    function updateVault(bytes32 vaultId) external whenStarted whenNotPaused {
-        DataTypes.Vault memory vault = vaults[vaultId];
-        DataTypes.Vault memory vault_ = _updateVaultIndex(vault);
+    // increase by the amount param. 
+    function increaseVaultLimit(bytes32 vaultId, uint256 amount) external whenStarted whenNotPaused onlyOwner {
+        require(vaultId > 0, "Invalid vaultId");
+        require(amount > 0, "Invalid increment");
 
-        //update storage
-        vaults[vaultId] = vault_;
+        //note: rp check + burn + calc matching amount + revert if insufficient
+        //note: placeholder
+        REALM_POINTS.balanceOf({season: hex'01', realmId: 1});
+
+        // get vault + check if has been created
+        (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
+
+        // update indexes and book all prior rewards
+        (DataTypes.UserInfo memory userInfo, DataTypes.Vault memory vault) = _updateUserIndexes(onBehalfOf, userInfo_, vault_);
+        
+        // check vault: not ended + user must be creator + global max not exceeded
+        if(vault.endTime <= block.timestamp) revert Errors.VaultMatured(vaultId);
+        if(vault.creator != onBehalfOf) revert Errors.UserIsNotVaultCreator(vaultId, onBehalfOf);
+        if((vault.stakedTokensLimit + amount) > MAX_MOCA_PER_VAULT) revert Errors.StakedTokenLimitExceeded(vaultId, vault.stakedTokens);
+
+        // increment limit
+        uint256 oldStakingLimit = vault.stakedTokensLimit;
+        vault.stakedTokensLimit += amount;
+
+        // update storage
+        vaults[vaultId] = vault;
+        users[onBehalfOf][vaultId] = userInfo;
+
+        emit VaultStakingLimitIncreased(vaultId, oldStakingLimit, vault.stakedTokensLimit);
     }
-
+    
     ///@notice Only allowed to reduce the creator fee factor
     function updateCreatorFee(bytes32 vaultId, address onBehalfOf, uint256 newCreatorFeeFactor) external whenStarted whenNotPaused onlyOwner {
 
@@ -450,17 +481,15 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
         emit CreatorFeeFactorUpdated(vaultId, vault.accounting.creatorFeeFactor, newCreatorFeeFactor);
 
-
         // update Fee factor
         vault.accounting.totalFeeFactor -= vault.accounting.creatorFeeFactor - newCreatorFeeFactor;
         vault.accounting.creatorFeeFactor = newCreatorFeeFactor;
         
 
         // update storage
-        vaults[vaultId] = vault_;
+        vaults[vaultId] = vault;
         users[onBehalfOf][vaultId] = userInfo;
     }
-
 
     ///@notice Only allowed to increase the nft fee factor
     ///@dev Creator decrements the totalNftFeeFactor, which is dividied up btw the various nft stakers
@@ -486,10 +515,19 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         vault.accounting.totalNftFeeFactor = newNftFeeFactor;
 
         // update storage
-        vaults[vaultId] = vault_;
+        vaults[vaultId] = vault;
         users[onBehalfOf][vaultId] = userInfo;
     }
 
+
+    ///@dev to prevent index drift. Called by off-chain script
+    function updateVault(bytes32 vaultId) external whenStarted whenNotPaused {
+        DataTypes.Vault memory vault = vaults[vaultId];
+        DataTypes.Vault memory vault_ = _updateVaultIndex(vault);
+
+        //update storage
+        vaults[vaultId] = vault_;
+    }
 
 //-------------------------------internal-------------------------------------------
 

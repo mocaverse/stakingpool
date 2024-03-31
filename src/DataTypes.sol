@@ -41,6 +41,7 @@ contract DataTypes {
         
         uint256 multiplier;
         uint256 allocPoints; 
+        uint256 stakedTokensLimit;          
 
         // staked assets
         uint256 stakedNfts;            //2^8 -1 NFTs

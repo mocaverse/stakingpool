@@ -32,5 +32,5 @@ library Errors {
     error NftFeeCanOnlyBeIncreased(bytes32 vaultId) ;
 
     error NftStakingLimitExceeded(bytes32 vaultId, uint256 currentNftAmount);
-    error TokenStakingLimitExceeded(bytes32 vaultId, uint256 currentTokenAmount);
+    error StakedTokenLimitExceeded(bytes32 vaultId, uint256 currentTokenAmount);
 }
