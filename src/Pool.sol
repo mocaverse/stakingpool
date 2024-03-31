@@ -35,10 +35,11 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     uint256 public constant nftMultiplier = 2;
     uint256 public constant vault60Multiplier = 2;
     uint256 public constant vault90Multiplier = 3;
-    uint256 public constant vaultBaseAllocPoints = 100 ether;     // need 18 dp precision for pool index calc
+    uint256 public constant vaultBaseAllocPoints = 100 ether;     //note: placeholder value need 18 dp precision for pool index calc
 
     // staking limits
     uint256 public constant MAX_NFTS_PER_VAULT = 3; 
+    uint256 public constant MAX_MOCA_PER_VAULT = 1_000_000 ether; //note: placeholder value
     
     // timing
     uint256 public immutable startTime;           // start time
@@ -152,7 +153,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         while (vaults[vaultId].vaultId != bytes32(0)) vaultId = _generateVaultId(++salt);      // If vaultId exists, generate new random Id
 
         // update poolIndex: book prior rewards, based on prior alloc points 
-        (DataTypes.PoolAccounting memory pool_, uint256 currentTimestamp) = _updatePoolIndex();
+        (DataTypes.PoolAccounting memory pool_, ) = _updatePoolIndex();
 
         // update poolAllocPoints
         uint256 vaultAllocPoints = vaultBaseAllocPoints * uint256(duration);        //duration multiplier: 30:1, 60:2, 90:3
@@ -192,9 +193,11 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         // update indexes and book all prior rewards
        (DataTypes.UserInfo memory userInfo, DataTypes.Vault memory vault) = _updateUserIndexes(onBehalfOf, userInfo_, vault_);
 
-        // if vault matured, no staking
+        // if vault matured, revert
         if(vault.endTime <= block.timestamp) revert Errors.VaultMatured(vaultId);
-        
+        // if staking limit exceeded, revert
+        if((vault.stakedTokens + amount) > MAX_MOCA_PER_VAULT) revert Errors.TokenStakingLimitExceeded(vaultId, vault.stakedTokens);
+
         // calc. allocPoints
         uint256 incomingAllocPoints = (amount * vault.multiplier);
         uint256 priorVaultAllocPoints = vault.allocPoints;
@@ -489,6 +492,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
 
 //-------------------------------internal-------------------------------------------
+
     /*//////////////////////////////////////////////////////////////
                                 INTERNAL
     //////////////////////////////////////////////////////////////*/
@@ -743,8 +747,8 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     /**
      * @notice To increase the duration of staking period and/or the rewards emitted
      * @dev Can increase rewards, duration MAY be extended. cannot reduce.
-     * @param amount Address of token contract
-     * @param duration Recepient of tokens
+     * @param amount Amount of tokens by which to increase rewards
+     * @param duration Amount of seconds by which to increase duration
      */
     function updateEmission(uint256 amount, uint256 duration) external onlyOwner {
         // either amount or duration could be 0. 
@@ -755,7 +759,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         require(block.timestamp < endTime_, "Staking over");
 
         // close the books
-        (DataTypes.PoolAccounting memory pool_, uint256 latestPoolTimestamp) = _updatePoolIndex();
+        (DataTypes.PoolAccounting memory pool_, ) = _updatePoolIndex();
 
         // updated values: amount or duration could be 0 
         uint256 unemittedRewards = pool_.totalPoolRewards - pool_.totalPoolRewardsEmitted;

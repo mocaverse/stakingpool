@@ -13,7 +13,6 @@ library Errors {
     
     error InvalidVaultPeriod();
     error InvalidStakingPeriod();
-
     error InsufficientTimeLeft();
 
     error NonExistentVault(bytes32 vaultId);
@@ -33,4 +32,5 @@ library Errors {
     error NftFeeCanOnlyBeIncreased(bytes32 vaultId) ;
 
     error NftStakingLimitExceeded(bytes32 vaultId, uint256 currentNftAmount);
+    error TokenStakingLimitExceeded(bytes32 vaultId, uint256 currentTokenAmount);
 }
