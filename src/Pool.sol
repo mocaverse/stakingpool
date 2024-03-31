@@ -13,20 +13,20 @@ import {Pausable} from "openzeppelin-contracts/contracts/utils/Pausable.sol";
 import {Ownable2Step, Ownable} from  "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
 
 // interfaces
+import {IRegistry} from "./interfaces/IRegistry.sol";
 import {IRewardsVault} from "./interfaces/IRewardsVault.sol";
 
 //Note: inherit ERC20 to issue stkMOCA
 contract Pool is ERC20, Pausable, Ownable2Step { 
     using SafeERC20 for IERC20;
 
-    // rp contract interface, token interface, NFT interface,
-    IERC20 public immutable STAKED_TOKEN;  
-    IERC20 public immutable LOCKED_NFT_TOKEN;  
-
-    IRewardsVault public immutable REWARDS_VAULT;
-    IERC20 public immutable REWARD_TOKEN;
-
+    // rp contract interfaces, token interfaces,
     address public immutable REALM_POINTS;
+    IRegistry public immutable REGISTRY;
+    IERC20 public immutable STAKED_TOKEN;  
+    
+    IERC20 public immutable REWARD_TOKEN;
+    IRewardsVault public immutable REWARDS_VAULT;
 
     // token dp
     uint256 public constant PRECISION = 18;                       
@@ -38,7 +38,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     uint256 public constant vaultBaseAllocPoints = 100 ether;     // need 18 dp precision for pool index calc
 
     // staking limits
-    uint256 public constant nftStakingLimit = 3; 
+    uint256 public constant MAX_NFTS_PER_VAULT = 3; 
     
     // timing
     uint256 public immutable startTime;           // start time
@@ -49,7 +49,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     // Pool Accounting
     DataTypes.PoolAccounting public pool;
  
-//-------------------------------Events-------------------------------------------
+//-------------------------------Events---------------------------------------------
 
     // EVENTS
     event DistributionUpdated(uint256 indexed newPoolEPS, uint256 indexed newEndTime);
@@ -63,7 +63,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     event VaultCreated(address indexed creator, bytes32 indexed vaultId, uint256 indexed endTime, DataTypes.VaultDuration duration);
     
     event StakedMoca(address indexed onBehalfOf, bytes32 indexed vaultId, uint256 amount);
-    event StakedMocaNft(address indexed onBehalfOf, bytes32 indexed vaultId, uint256 amount);
+    event StakedMocaNft(address indexed onBehalfOf, bytes32 indexed vaultId, uint256[] indexed tokenIds);
     event UnstakedMoca(address indexed onBehalfOf, bytes32 indexed vaultId, uint256 amount);
     event UnstakedMocaNft(address indexed onBehalfOf, bytes32 indexed vaultId, uint256 amount);
 
@@ -89,11 +89,11 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     // Tracks unclaimed rewards accrued for each user: user -> vaultId -> userInfo
     mapping(address user => mapping (bytes32 vaultId => DataTypes.UserInfo userInfo)) public users;
 
-//-------------------------------external------------------------------------------
+//-------------------------------external-------------------------------------------
 
 
     constructor(
-        IERC20 stakedToken, IERC20 lockedNftToken, IERC20 rewardToken, address realmPoints, address rewardsVault, 
+        IERC20 stakedToken, IERC20 rewardToken, address realmPoints, address rewardsVault, address registry, 
         uint256 startTime_, uint256 duration, uint256 rewards,
         string memory name, string memory symbol, address owner) payable Ownable(owner) ERC20(name, symbol) {
     
@@ -102,11 +102,11 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         require(rewards > 0, "Invalid rewards");
 
         STAKED_TOKEN = stakedToken;
-        LOCKED_NFT_TOKEN = lockedNftToken;
         REWARD_TOKEN = rewardToken;
 
         REALM_POINTS = realmPoints;
         REWARDS_VAULT = IRewardsVault(rewardsVault);
+        REGISTRY = IRegistry(registry);
 
         DataTypes.PoolAccounting memory pool_;
 
@@ -232,11 +232,13 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     }
 
         
-            // Note: reset NFT assoc via recordUnstake()
-            // else users cannot switch nfts to the new pool.
-    function stakeNfts(bytes32 vaultId, address onBehalfOf, uint256 amount) external whenStarted whenNotPaused onlyOwner {
+    // Note: reset NFT assoc via recordUnstake()
+    // else users cannot switch nfts to the new pool.
+    function stakeNfts(bytes32 vaultId, address onBehalfOf, uint256[] calldata tokenIds) external whenStarted whenNotPaused onlyOwner {
+        uint256 arrLength = tokenIds.length;
+
         // usual blah blah checks
-        require(amount > 0, "Invalid amount");
+        require(arrLength > 0 && arrLength < MAX_NFTS_PER_VAULT, "Invalid amount"); 
         require(vaultId > 0, "Invalid vaultId");
 
         // get vault + check if has been created
@@ -247,10 +249,11 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
         // sanity checks: if vault matured, no staking | new nft staked amount cannot exceed limit
         if(vault.endTime <= block.timestamp) revert Errors.VaultMatured(vaultId);            
-        if(vault.stakedNfts + amount > nftStakingLimit) revert Errors.NftStakingLimitExceeded(vaultId, vault.stakedNfts);
+        if(vault.stakedNfts + arrLength > MAX_NFTS_PER_VAULT) revert Errors.NftStakingLimitExceeded(vaultId, vault.stakedNfts);
 
         // update user & book 1st stake incentive
-        userInfo.stakedNfts += amount;
+        userInfo.stakedNfts += arrLength;
+        userInfo.tokenIds = _concatArrays(userInfo.tokenIds, tokenIds);
         if(vault.stakedNfts == 0) {
             userInfo.accNftStakingRewards = vault.accounting.accNftStakingRewards;
             emit NftFeesAccrued(onBehalfOf, userInfo.accNftStakingRewards);
@@ -261,10 +264,10 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         uint256 oldAllocPoints = vault.allocPoints;
         
         // update vault
-        vault.stakedNfts += amount;
-        vault.multiplier += amount * nftMultiplier;
+        vault.stakedNfts += arrLength;
+        vault.multiplier += arrLength * nftMultiplier;
 
-        //calc. new alloc points | there is only imapct if vault has prior stakedTokens
+        //calc. new alloc points | there is only impact if vault has prior stakedTokens
         if(vault.stakedTokens > 0) {
             uint256 newAllocPoints = vault.stakedTokens * vault.multiplier;
             uint256 deltaAllocPoints = newAllocPoints - oldAllocPoints;
@@ -278,11 +281,11 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         vaults[vaultId] = vault;
         users[onBehalfOf][vaultId] = userInfo;
 
-        emit StakedMocaNft(onBehalfOf, vaultId, amount);
+        emit StakedMocaNft(onBehalfOf, vaultId, tokenIds);
         emit VaultMultiplierUpdated(vaultId, oldMultiplier, vault.multiplier);
 
-        // grab MOCA
-        LOCKED_NFT_TOKEN.safeTransferFrom(onBehalfOf, address(this), amount);
+        // record stake with registry
+        REGISTRY.recordStake(onBehalfOf, tokenIds, vaultId);
     }
 
     function claimRewards(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused onlyOwner {
@@ -386,8 +389,13 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         //update balances: user + vault
         if(stakedNfts > 0){
             
+            // record unstake with registry
+            REGISTRY.recordUnstake(onBehalfOf, userInfo.tokenIds, vaultId);
+
+            // update vault and user
             vault.stakedNfts -= userInfo.stakedNfts;
-            userInfo.stakedNfts = 0;
+            delete userInfo.stakedNfts;
+            delete userInfo.tokenIds;
 
             //_burn NFT chips?
             emit UnstakedMocaNft(onBehalfOf, vaultId, stakedNfts);       
@@ -407,8 +415,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         vaults[vaultId] = vault;
         users[onBehalfOf][vaultId] = userInfo;
 
-        // return principal MOCA + NFT chip
-        if(stakedNfts > 0) LOCKED_NFT_TOKEN.safeTransfer(onBehalfOf, stakedNfts);
+        // return principal MOCA
         if(stakedTokens > 0) STAKED_TOKEN.safeTransfer(onBehalfOf, stakedTokens); 
     }
 
@@ -669,6 +676,27 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         return (userInfo, vault);
     }
     
+
+    ///@dev concat two uint256 arrays: [1,2,3],[4,5] -> [1,2,3,4,5]
+    function _concatArrays(uint256[] memory arr1, uint256[] memory arr2) internal pure returns(uint256[] memory) {
+        
+        // create resulting arr
+        uint256 len1 = arr1.length;
+        uint256 len2 = arr2.length;
+        uint256[] memory resArr = new uint256[](len1 + len2);
+        
+        uint256 i;
+        for (; i < len1; i++) {
+            resArr[i] = arr1[i];
+        }
+        
+        uint256 j;
+        while (j < len2) {
+            resArr[i++] = arr2[j++];
+        }
+
+        return resArr;
+    }
 
 
     ///@dev Generate a vaultId. keccak256 is cheaper than using a counter with a SSTORE, even accounting for eventual collision retries.

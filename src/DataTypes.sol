@@ -46,9 +46,6 @@ contract DataTypes {
         uint256 stakedNfts;            //2^8 -1 NFTs
         uint256 stakedTokens;
 
-        // nfts staked: array.length < 4
-        uint256[] tokenIds;
-
         VaultAccounting accounting;
     }
 
@@ -83,6 +80,8 @@ contract DataTypes {
         // staked assets
         uint256 stakedNfts;            
         uint256 stakedTokens;
+        // nfts staked: array.length < 4
+        uint256[] tokenIds;
 
         // indexes
         uint256 userIndex; 
@@ -98,9 +97,6 @@ contract DataTypes {
 
         //rewards: creatorFees
         uint256 claimedCreatorRewards;
-
-        // nfts staked: array.length < 4
-        uint256[] tokenIds;
     }
 }
 
