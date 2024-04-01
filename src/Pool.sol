@@ -29,6 +29,9 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     IERC20 public immutable REWARD_TOKEN;
     IRewardsVault public immutable REWARDS_VAULT;
 
+    // router address 
+    address public router;
+
     // token dp
     uint256 public constant PRECISION = 18;                       
     
@@ -46,6 +49,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     uint256 public immutable startTime;           // start time
     uint256 public endTime;                       // non-immutable: allow extension staking period
 
+    // state
     bool public isFrozen;
 
     // Pool Accounting
@@ -55,6 +59,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
     // EVENTS
     event DistributionUpdated(uint256 indexed newPoolEPS, uint256 indexed newEndTime);
+    event RouterUpdated(address indexed oldRouter, address indexed newRouter);
 
     event PoolIndexUpdated(uint256 indexed lastUpdateTimestamp, uint256 indexed oldIndex, uint256 indexed newIndex);
     event VaultIndexUpdated(bytes32 indexed vaultId, uint256 indexed vaultIndex, uint256 indexed vaultAccruedRewards);
@@ -141,13 +146,12 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     function createFreeVault() external whenStarted whenNotPaused onlyOwner {}
 
     ///@dev creates empty vault
-    function createVault(address onBehalfOf, uint8 salt, DataTypes.VaultDuration duration, uint256 creatorFee, uint256 nftFee) external whenStarted whenNotPaused onlyOwner {
-        //note: rp check + call consume
-        //note: placeholder
-        REALM_POINTS.balanceOf({season: hex'01', realmId: 1});
-        
-        // calc. vault limit based on RP. note: placeholder
-        // revert if MAX_MOCA_PER_VAULT exceeded
+    function createVault(address onBehalfOf, uint8 salt, DataTypes.VaultDuration duration, uint256 creatorFee, uint256 nftFee) external whenStarted whenNotPaused auth {
+        //note: placeholder. rp check + call consume
+        //REALM_POINTS.someFunction()
+
+        // note: placeholder
+        // calc. vault limit based on RP. revert if MAX_MOCA_PER_VAULT exceeded
         uint256 stakedTokensLimit;
 
         // invalid selection
@@ -192,7 +196,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         emit VaultCreated(onBehalfOf, vaultId, vaultEndTime, duration); //emit totaLAllocPpoints updated?
     }  
 
-    function stakeTokens(bytes32 vaultId, address onBehalfOf, uint256 amount) external whenStarted whenNotPaused onlyOwner {
+    function stakeTokens(bytes32 vaultId, address onBehalfOf, uint256 amount) external whenStarted whenNotPaused auth {
         // usual blah blah checks
         require(amount > 0, "Invalid amount");
         require(vaultId > 0, "Invalid vaultId");
@@ -247,7 +251,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         
     // Note: reset NFT assoc via recordUnstake()
     // else users cannot switch nfts to the new pool.
-    function stakeNfts(bytes32 vaultId, address onBehalfOf, uint256[] calldata tokenIds) external whenStarted whenNotPaused onlyOwner {
+    function stakeNfts(bytes32 vaultId, address onBehalfOf, uint256[] calldata tokenIds) external whenStarted whenNotPaused auth {
         uint256 arrLength = tokenIds.length;
 
         // usual blah blah checks
@@ -301,7 +305,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         REGISTRY.recordStake(onBehalfOf, tokenIds, vaultId);
     }
 
-    function claimRewards(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused onlyOwner {
+    function claimRewards(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused auth {
         // usual blah blah checks
         require(vaultId > 0, "Invalid vaultId");
 
@@ -326,7 +330,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         REWARDS_VAULT.payRewards(onBehalfOf, totalUnclaimedRewards);
     }
 
-    function claimFees(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused onlyOwner {
+    function claimFees(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused auth {
         // usual blah blah checks
         require(vaultId > 0, "Invalid vaultId");
 
@@ -371,7 +375,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         REWARDS_VAULT.payRewards(onBehalfOf, totalUnclaimedRewards);
     } 
 
-    function unstakeAll(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused onlyOwner {
+    function unstakeAll(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused auth {
         // usual blah blah checks
         require(vaultId > 0, "Invalid vaultId");
 
@@ -433,7 +437,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     }
 
     // increase by the amount param. 
-    function increaseVaultLimit(bytes32 vaultId, uint256 amount) external whenStarted whenNotPaused onlyOwner {
+    function increaseVaultLimit(bytes32 vaultId, address onBehalfOf, uint256 amount) external whenStarted whenNotPaused auth {
         require(vaultId > 0, "Invalid vaultId");
         require(amount > 0, "Invalid increment");
 
@@ -464,7 +468,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     }
     
     ///@notice Only allowed to reduce the creator fee factor
-    function updateCreatorFee(bytes32 vaultId, address onBehalfOf, uint256 newCreatorFeeFactor) external whenStarted whenNotPaused onlyOwner {
+    function updateCreatorFee(bytes32 vaultId, address onBehalfOf, uint256 newCreatorFeeFactor) external whenStarted whenNotPaused auth {
 
         // get vault + check if has been created
        (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
@@ -493,7 +497,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
     ///@notice Only allowed to increase the nft fee factor
     ///@dev Creator decrements the totalNftFeeFactor, which is dividied up btw the various nft stakers
-    function updateNftFee(bytes32 vaultId, address onBehalfOf, uint256 newNftFeeFactor) external whenStarted whenNotPaused onlyOwner {
+    function updateNftFee(bytes32 vaultId, address onBehalfOf, uint256 newNftFeeFactor) external whenStarted whenNotPaused auth {
 
         // get vault + check if has been created
        (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
@@ -521,6 +525,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
 
     ///@dev to prevent index drift. Called by off-chain script
+    ///@dev no need to restrict access
     function updateVault(bytes32 vaultId) external whenStarted whenNotPaused {
         DataTypes.Vault memory vault = vaults[vaultId];
         DataTypes.Vault memory vault_ = _updateVaultIndex(vault);
@@ -752,36 +757,16 @@ contract Pool is ERC20, Pausable, Ownable2Step {
                             POOL MANAGEMENT
     //////////////////////////////////////////////////////////////*/
 
-    /**
-     * @notice Pause pool
-     */
-    function pause() external onlyOwner {
-        _pause();
-    }
 
-    /**
-     * @notice Unpause pool
-     */
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-
-
-    /**
-     * @notice To freeze the pool in the event of something untoward occuring
-     * @dev Only callable from a paused state, affirming that staking should not resume
-     *      Nothing to be updated. Freeze as is.
-            Enables emergencyExit() to be called.
-     */
-    function freeze() external whenPaused onlyOwner {
-        require(isFrozen == false, "Pool is frozen");
+    function setRouter(address router_) external onlyOwner {
+        require(router_ != address(0), "Invalid address");
         
-        isFrozen = true;
-
-        emit PoolFrozen(block.timestamp);
+        address oldRouter = router;
+        router = router_;
+        
+        emit RouterUpdated(oldRouter, router_);
     }
-
-
+    
     /**
      * @notice To increase the duration of staking period and/or the rewards emitted
      * @dev Can increase rewards, duration MAY be extended. cannot reduce.
@@ -815,7 +800,36 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
         emit DistributionUpdated(pool_.emissisonPerSecond, newEndTime);
     }
-    
+
+
+    /**
+     * @notice Pause pool
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /**
+     * @notice Unpause pool
+     */
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+
+    /**
+     * @notice To freeze the pool in the event of something untoward occuring
+     * @dev Only callable from a paused state, affirming that staking should not resume
+     *      Nothing to be updated. Freeze as is.
+            Enables emergencyExit() to be called.
+     */
+    function freeze() external whenPaused onlyOwner {
+        require(isFrozen == false, "Pool is frozen");
+        
+        isFrozen = true;
+
+        emit PoolFrozen(block.timestamp);
+    }  
 
     /*//////////////////////////////////////////////////////////////
                                 RECOVER
@@ -899,6 +913,14 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     modifier whenStarted() {
 
         require(block.timestamp >= startTime, "Not started");    
+
+        _;
+    }
+
+
+    modifier auth() {
+        
+        require(msg.sender == router || msg.sender == owner(), "Incorrect Caller");    
 
         _;
     }

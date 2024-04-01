@@ -52,6 +52,9 @@ abstract contract StateZero is Test {
     uint256 public userBPrinciple;
     uint256 public userCPrinciple;
 
+    // router
+    address public router;
+
 //-------------------------------events-------------------------------------------
     event DistributionUpdated(uint256 indexed newPoolEPS, uint256 indexed newEndTime);
 
@@ -74,11 +77,13 @@ abstract contract StateZero is Test {
 //-----------------------------------------------------------------------------------
 
     function setUp() public virtual {
-        owner = address(0xABCD);
 
-        userA = address(0xA);
-        userB = address(0xB);
-        userC = address(0xC);
+        owner = makeAddr("owner");
+        router = makeAddr("router");
+        
+        userA = makeAddr("userA");
+        userB = makeAddr("userB");
+        userC = makeAddr("userC");
 
         userAPrinciple = 50 ether;
         userBPrinciple = 30 ether; 
@@ -101,9 +106,12 @@ abstract contract StateZero is Test {
         mocaToken.approve(address(rewardsVault), rewards); 
         rewardsVault.deposit(owner, rewards);
 
-        // IERC20 stakedToken, IERC20 lockedNftToken, IERC20 rewardToken, address realmPoints, address rewardsVault, uint128 startTime_, uint128 duration, uint128 rewards, 
+        // IERC20 stakedToken, IERC20 rewardToken, address realmPoints, address rewardsVault, address registry,
+        // uint256 startTime_, uint256 duration, uint256 rewards
         // string memory name, string memory symbol, address owner
-        stakingPool = new Pool(IERC20(mocaToken), IERC20(nftRegistry), IERC20(mocaToken), address(0), address(rewardsVault), startTime, duration, rewards, "stkMOCA", "stkMOCA", owner);
+        stakingPool = new Pool(IERC20(mocaToken), IERC20(mocaToken), address(0), address(rewardsVault), address(nftRegistry), startTime, duration, rewards, "stkMOCA", "stkMOCA", owner);
+        //set router
+        stakingPool.setRouter(router);
 
         rewardsVault.setPool(address(stakingPool));
 
@@ -228,7 +236,7 @@ abstract contract StateZero is Test {
             bytes32 vaultId_, address creator,
             DataTypes.VaultDuration duration_, uint256 endTime_,
             
-            uint256 multiplier, uint256 allocPoints,
+            uint256 multiplier, uint256 allocPoints, uint256 stakedTokensLimit,
             uint256 stakedNfts, uint256 stakedTokens,
             
             DataTypes.VaultAccounting memory accounting
@@ -328,7 +336,7 @@ abstract contract StateT02 is StateT01 {
         vaultIdA = generateVaultId(saltA, userA);
 
         // create vault
-        vm.prank(userA);       
+        vm.prank(router);       
         stakingPool.createVault(userA, saltA, DataTypes.VaultDuration.THIRTY, creatorFeeA, nftFeeA);
     }
     
@@ -376,7 +384,7 @@ contract StateT02Test is StateT02 {
 
     function testCanStake() public {
         
-        vm.prank(userA);
+        vm.prank(router);
         stakingPool.stakeTokens(vaultIdA, userA, 1e18);
         // check events
         // check staking stuff
@@ -413,7 +421,7 @@ abstract contract StateT03 is StateT02 {
 
         vm.warp(3);
 
-        vm.prank(userA);
+        vm.prank(router);
         stakingPool.stakeTokens(vaultIdA, userA, userAPrinciple);
     }
 }
@@ -524,7 +532,7 @@ abstract contract StateT04 is StateT03 {
 
         vm.warp(4);
 
-        vm.prank(userB);
+        vm.prank(router);
         stakingPool.stakeTokens(vaultIdA, userB, userBPrinciple);
     }
 }

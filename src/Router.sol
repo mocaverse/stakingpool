@@ -7,15 +7,18 @@ import {SafeERC20, IERC20} from "./../lib/openzeppelin-contracts/contracts/token
 
 import {IERC20Permit} from "lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
+//note: inherit forwarder stuff
+
 contract Router {
     using SafeERC20 for IERC20;
 
     address public STAKED_TOKEN;  
-    address public LOCKED_NFT_TOKEN;  
+    address public POOL;
 
-    constructor(address mocaToken, address mocaNFT){
+    constructor(address mocaToken, address pool){
         STAKED_TOKEN = mocaToken;
-        LOCKED_NFT_TOKEN = mocaNFT;
+        POOL = pool;
+
     }
 
 
