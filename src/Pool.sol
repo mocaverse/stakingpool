@@ -840,7 +840,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
      * @param onBehalfOf Recepient of tokens
      */
     function emergencyExit(bytes32 vaultId, address onBehalfOf) external whenStarted whenPaused onlyOwner {
-        require(isFrozen = true, "Pool not frozen");
+        require(isFrozen, "Pool not frozen");
 
         // usual blah blah checks
         require(vaultId > 0, "Invalid vaultId");
