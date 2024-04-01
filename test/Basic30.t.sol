@@ -172,7 +172,7 @@ abstract contract StateZero is Test {
         assertEq(block.timestamp, 0);
     }
 
-    function getPoolStruct() public returns (DataTypes.PoolAccounting memory) {
+    function getPoolStruct() public view returns (DataTypes.PoolAccounting memory) {
         (
             uint256 totalAllocPoints, 
             uint256 emissisonPerSecond, 
@@ -197,7 +197,7 @@ abstract contract StateZero is Test {
         return pool;
     }
 
-    function getUserInfoStruct(bytes32 vaultId, address user) public returns (DataTypes.UserInfo memory){
+    function getUserInfoStruct(bytes32 vaultId, address user) public view returns (DataTypes.UserInfo memory){
         (
             //bytes32 vaultId_, 
             uint256 stakedNfts, uint256 stakedTokens, 
@@ -231,7 +231,7 @@ abstract contract StateZero is Test {
         return userInfo;
     }
 
-    function getVaultStruct(bytes32 vaultId) public returns (DataTypes.Vault memory) {
+    function getVaultStruct(bytes32 vaultId) public view returns (DataTypes.Vault memory) {
         (
             bytes32 vaultId_, address creator,
             DataTypes.VaultDuration duration_, uint256 endTime_,

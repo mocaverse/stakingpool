@@ -72,7 +72,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     event StakedMoca(address indexed onBehalfOf, bytes32 indexed vaultId, uint256 amount);
     event StakedMocaNft(address indexed onBehalfOf, bytes32 indexed vaultId, uint256[] indexed tokenIds);
     event UnstakedMoca(address indexed onBehalfOf, bytes32 indexed vaultId, uint256 amount);
-    event UnstakedMocaNft(address indexed onBehalfOf, bytes32 indexed vaultId, uint256 amount);
+    event UnstakedMocaNft(address indexed onBehalfOf, bytes32 indexed vaultId, uint256[] indexed tokenIds);
 
     event RewardsAccrued(address indexed user, uint256 amount);
     event NftFeesAccrued(address indexed user, uint256 amount);
@@ -408,14 +408,12 @@ contract Pool is ERC20, Pausable, Ownable2Step {
             
             // record unstake with registry
             REGISTRY.recordUnstake(onBehalfOf, userInfo.tokenIds, vaultId);
+            emit UnstakedMocaNft(onBehalfOf, vaultId, userInfo.tokenIds);       
 
             // update vault and user
             vault.stakedNfts -= userInfo.stakedNfts;
             delete userInfo.stakedNfts;
             delete userInfo.tokenIds;
-
-            //_burn NFT chips?
-            emit UnstakedMocaNft(onBehalfOf, vaultId, stakedNfts);       
         }
 
         if(stakedTokens > 0){
@@ -851,7 +849,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
        (DataTypes.UserInfo memory userInfo, DataTypes.Vault memory vault) = _cache(vaultId, onBehalfOf);
 
         // check if vault has matured
-        if(vault.endTime < block.timestamp) revert Errors.VaultNotMatured(vaultId); //note: wtf
+        if(vault.endTime < block.timestamp) revert Errors.VaultNotMatured(vaultId); 
         if(userInfo.stakedNfts == 0 || userInfo.stakedNfts == 0) revert Errors.UserHasNothingStaked(vaultId, onBehalfOf);
 
         // revert if 0 balances of tokens or nfts?
@@ -863,14 +861,15 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         
         //update balances: user + vault
         if(stakedNfts > 0){
+
+            // record unstake with registry, else users cannot switch nfts to the new pool
+            REGISTRY.recordUnstake(onBehalfOf, userInfo.tokenIds, vaultId);
+            emit UnstakedMocaNft(onBehalfOf, vaultId, userInfo.tokenIds);       
+
+            // update vault and user
             vault.stakedNfts -= stakedNfts;
-            userInfo.stakedNfts -= stakedNfts;
-        
-            // Note: reset NFT assoc via recordUnstake()
-            // else users cannot switch nfts to the new pool.
-        
-            //_burn NFT chips?
-            emit UnstakedMocaNft(onBehalfOf, vaultId, stakedNfts);       
+            delete userInfo.stakedNfts;
+            delete userInfo.tokenIds;
         }
 
         if(stakedTokens > 0){
