@@ -44,20 +44,19 @@ contract DataTypes {
         uint256 stakedTokensLimit;          
 
         // staked assets
-        uint256 stakedNfts;            //2^8 -1 NFTs
+        uint256 stakedNfts;            //2^8 -1 NFTs. uint8
         uint256 stakedTokens;
 
         VaultAccounting accounting;
     }
 
-    struct VaultAccounting{
+    struct VaultAccounting {
         // index
         uint256 vaultIndex;             //rewardsAccPerAllocPoint
         uint256 vaultNftIndex;          //rewardsAccPerNFT
         uint256 rewardsAccPerToken;
 
         // fees: pct values, with 18dp precision
-        uint256 totalFeeFactor;   
         uint256 creatorFeeFactor;   
         uint256 totalNftFeeFactor;       
             
@@ -65,7 +64,6 @@ contract DataTypes {
         uint256 totalAccRewards;
         uint256 accNftStakingRewards;
         uint256 accCreatorRewards;    
-        uint256 bonusBall;
 
         // total: staking, nft, creator
         uint256 totalClaimedRewards;    
@@ -80,7 +78,7 @@ contract DataTypes {
 
         // staked assets
         uint256 stakedNfts;            
-        uint256 stakedTokens;
+        uint256 stakedTokens;   //refactor
         // nfts staked: array.length < 4
         uint256[] tokenIds;
 

@@ -262,6 +262,13 @@ abstract contract StateZero is Test {
         return vault;
     }
 
+    function generateVaultId(uint8 salt) public view returns (bytes32) {
+        return bytes32(keccak256(abi.encode(msg.sender, block.timestamp, salt)));
+    }
+
+    function generateVaultId(uint8 salt, address onBehalfOf) public view returns (bytes32) {
+        return bytes32(keccak256(abi.encode(onBehalfOf, block.timestamp, salt)));
+    }
 }
 
 //Note:  t = 0. Pool deployed but not active yet.
@@ -333,16 +340,13 @@ abstract contract StateT02 is StateT01 {
 
         vm.warp(2);
 
-        vaultIdA = generateVaultId(saltA, userA);
+        vaultIdA = generateVaultId(saltA, router);
 
         // create vault
         vm.prank(router);       
         stakingPool.createVault(userA, saltA, DataTypes.VaultDuration.THIRTY, creatorFeeA, nftFeeA);
     }
-    
-    function generateVaultId(uint8 salt, address onBehalfOf) public view returns (bytes32) {
-        return bytes32(keccak256(abi.encode(onBehalfOf, block.timestamp, salt)));
-    }
+
 
 }
 

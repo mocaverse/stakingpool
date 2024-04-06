@@ -39,12 +39,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     uint256 public constant nftMultiplier = 2;
     uint256 public constant vault60Multiplier = 2;
     uint256 public constant vault90Multiplier = 3;
-    uint256 public constant vaultBaseAllocPoints = 100 ether;     //note: placeholder value need 18 dp precision for pool index calc
-
-    // staking limits
-    uint256 public constant MAX_NFTS_PER_VAULT = 3; 
-    uint256 public constant MAX_MOCA_PER_VAULT = 1_000_000 ether; //note: placeholder value
-    
+  
     // timing
     uint256 public immutable startTime;           // start time
     uint256 public endTime;                       // non-immutable: allow extension staking period
@@ -54,6 +49,20 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
     // Pool Accounting
     DataTypes.PoolAccounting public pool;
+
+// ------- [note: need to confirm values] -------------------
+
+    // realm points 
+    bytes32 public constant season = hex"01"; 
+    bytes32 public constant consumeReasonCode = hex"01";
+
+    //increments
+    uint256 public constant MOCA_INCREMENT_PER_RP = 800 ether;    
+
+    // staking limits
+    uint256 public constant MAX_NFTS_PER_VAULT = 3; 
+    uint256 public constant BASE_MOCA_STAKING_LIMIT = 200_000 ether;    // on vault creation, starting value
+    uint256 public constant MAX_MOCA_PER_VAULT = 1_000_000 ether;        //note: placeholder value
  
 //-------------------------------Events---------------------------------------------
 
@@ -89,6 +98,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
     event VaultStakingLimitIncreased(bytes32 indexed vaultId, uint256 oldStakingLimit, uint256 indexed newStakingLimit);
 
+    event RealmPointsBurnt(uint256 realmId, uint256 rpBurnt);
 
 //-------------------------------mappings-------------------------------------------
 
@@ -146,13 +156,10 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     function createFreeVault() external whenStarted whenNotPaused onlyOwner {}
 
     ///@dev creates empty vault
-    function createVault(address onBehalfOf, uint8 salt, DataTypes.VaultDuration duration, uint256 creatorFee, uint256 nftFee) external whenStarted whenNotPaused auth {
+    function createVault(address onBehalfOf, uint8 salt, DataTypes.VaultDuration duration, uint256 creatorFee, uint256 nftFee,  uint256 realmId, uint8 v, bytes32 r, bytes32 s) external whenStarted whenNotPaused auth {
         //note: placeholder. rp check + call consume
-        //REALM_POINTS.someFunction()
-
-        // note: placeholder
-        // calc. vault limit based on RP. revert if MAX_MOCA_PER_VAULT exceeded
-        uint256 stakedTokensLimit;
+        uint256 rpRequired;
+        _checkAndBurnRp(rpRequired, realmId, v, r, s);
 
         // invalid selection
         if(uint8(duration) == 0) revert Errors.InvalidVaultPeriod();      
@@ -168,10 +175,6 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         // update poolIndex: book prior rewards, based on prior alloc points 
         (DataTypes.PoolAccounting memory pool_, ) = _updatePoolIndex();
 
-        // update poolAllocPoints
-        uint256 vaultAllocPoints = vaultBaseAllocPoints * uint256(duration);        //duration multiplier: 30:1, 60:2, 90:3
-        pool_.totalAllocPoints += vaultAllocPoints;
-
         // build vault
         DataTypes.Vault memory vault; 
             vault.vaultId = vaultId;
@@ -179,13 +182,11 @@ contract Pool is ERC20, Pausable, Ownable2Step {
             vault.duration = duration;
             vault.endTime = vaultEndTime; 
             vault.multiplier = uint8(duration); 
-            vault.allocPoints = vaultAllocPoints;                             // vaultAllocPoints: 30:1, 60:2, 90:3
-            vault.stakedTokensLimit = stakedTokensLimit;                      //note: placeholder
+            vault.stakedTokensLimit = BASE_MOCA_STAKING_LIMIT;                   //note: placeholder
             
             // index
             vault.accounting.vaultIndex = pool_.poolIndex;
-            // fees: note: precision check
-            vault.accounting.totalFeeFactor = nftFee + creatorFee;
+            // fees: note: precision check + 100% check
             vault.accounting.totalNftFeeFactor = nftFee;
             vault.accounting.creatorFeeFactor = creatorFee;
 
@@ -207,29 +208,16 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         // update indexes and book all prior rewards
        (DataTypes.UserInfo memory userInfo, DataTypes.Vault memory vault) = _updateUserIndexes(onBehalfOf, userInfo_, vault_);
 
-        // if vault matured, revert
+        // if vault matured or staking limit exceeded, revert
         if(vault.endTime <= block.timestamp) revert Errors.VaultMatured(vaultId);
-        // if staking limit exceeded, revert
         if((vault.stakedTokens + amount) > MAX_MOCA_PER_VAULT) revert Errors.StakedTokenLimitExceeded(vaultId, vault.stakedTokens);
 
         // calc. allocPoints
         uint256 incomingAllocPoints = (amount * vault.multiplier);
-        uint256 priorVaultAllocPoints = vault.allocPoints;
 
-        if (vault.stakedTokens == 0){    // check if first stake: eligible for bonusBall
-            
-            // award bonusBall rewards
-            userInfo.accStakingRewards += vault.accounting.bonusBall;
-            
-            // overwrite vaultBaseAllocPoints w/ incoming
-            vault.allocPoints = incomingAllocPoints;
-            pool.totalAllocPoints = pool.totalAllocPoints + incomingAllocPoints - priorVaultAllocPoints;
-
-        } else {
-
-            vault.allocPoints += incomingAllocPoints;
-            pool.totalAllocPoints += incomingAllocPoints;
-        }
+        // increment allocPoints
+        vault.allocPoints += incomingAllocPoints;
+        pool.totalAllocPoints += incomingAllocPoints;
         
         // increment stakedTokens: user, vault
         vault.stakedTokens += amount;
@@ -434,15 +422,18 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         if(stakedTokens > 0) STAKED_TOKEN.safeTransfer(onBehalfOf, stakedTokens); 
     }
 
-    // increase by the amount param. 
-    function increaseVaultLimit(bytes32 vaultId, address onBehalfOf, uint256 amount) external whenStarted whenNotPaused auth {
+    // increase limit by the amount param. 
+    // vault staking limit cannot exceed global hard cap
+    // RP required = 50 + X. X goes towards calc. staking increment. 50 is a base charge.
+    function increaseVaultLimit(bytes32 vaultId, address onBehalfOf, uint256 amount,  uint256 realmId, uint8 v, bytes32 r, bytes32 s) external whenStarted whenNotPaused auth {
         require(vaultId > 0, "Invalid vaultId");
-        require(amount > 0, "Invalid increment");
+        require(amount > MOCA_INCREMENT_PER_RP, "Invalid increment");
 
-        //note: rp check + burn + calc matching amount + revert if insufficient
-        //note: placeholder
-        REALM_POINTS.balanceOf({season: hex'01', realmId: 1});
-
+        // calc. RP required. fee charge: 50 RP, every RP thereafter contributes to incrementing the limit
+        // division involves rounding down
+        uint256 rpRequired = (amount / MOCA_INCREMENT_PER_RP) + 50;
+        _checkAndBurnRp(rpRequired, realmId, v, r, s);
+        
         // get vault + check if has been created
         (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
 
@@ -452,11 +443,13 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         // check vault: not ended + user must be creator + global max not exceeded
         if(vault.endTime <= block.timestamp) revert Errors.VaultMatured(vaultId);
         if(vault.creator != onBehalfOf) revert Errors.UserIsNotVaultCreator(vaultId, onBehalfOf);
-        if((vault.stakedTokensLimit + amount) > MAX_MOCA_PER_VAULT) revert Errors.StakedTokenLimitExceeded(vaultId, vault.stakedTokens);
-
-        // increment limit
+    
+        // increment limit 
         uint256 oldStakingLimit = vault.stakedTokensLimit;
-        vault.stakedTokensLimit += amount;
+        vault.stakedTokensLimit = (rpRequired * MOCA_INCREMENT_PER_RP) + oldStakingLimit;
+
+        // check that global hardcap is not exceeded
+        if((vault.stakedTokensLimit) > MAX_MOCA_PER_VAULT) revert Errors.StakedTokenLimitExceeded(vaultId, vault.stakedTokens);
 
         // update storage
         vaults[vaultId] = vault;
@@ -466,7 +459,10 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     }
     
     ///@notice Only allowed to reduce the creator fee factor
-    function updateCreatorFee(bytes32 vaultId, address onBehalfOf, uint256 newCreatorFeeFactor) external whenStarted whenNotPaused auth {
+    function updateCreatorFee(bytes32 vaultId, address onBehalfOf, uint256 newCreatorFeeFactor,  uint256 realmId, uint8 v, bytes32 r, bytes32 s) external whenStarted whenNotPaused auth {
+        
+        //note: 50 RP needed to adjust fees
+        _checkAndBurnRp(50, realmId, v, r, s);
 
         // get vault + check if has been created
        (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
@@ -481,13 +477,15 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         // incoming feeFactor must be lower than current
         if(newCreatorFeeFactor >= vault.accounting.creatorFeeFactor) revert Errors.CreatorFeeCanOnlyBeDecreased(vaultId);
 
+        //note: total fee cannot exceed 100%, which is defined as 1e18
+        uint256 totalFeeFactor = newCreatorFeeFactor + vault.accounting.totalNftFeeFactor;
+        if(totalFeeFactor > 1e18) revert Errors.TotalFeeFactorExceeded();
+
         emit CreatorFeeFactorUpdated(vaultId, vault.accounting.creatorFeeFactor, newCreatorFeeFactor);
 
         // update Fee factor
-        vault.accounting.totalFeeFactor -= vault.accounting.creatorFeeFactor - newCreatorFeeFactor;
         vault.accounting.creatorFeeFactor = newCreatorFeeFactor;
         
-
         // update storage
         vaults[vaultId] = vault;
         users[onBehalfOf][vaultId] = userInfo;
@@ -495,7 +493,10 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
     ///@notice Only allowed to increase the nft fee factor
     ///@dev Creator decrements the totalNftFeeFactor, which is dividied up btw the various nft stakers
-    function updateNftFee(bytes32 vaultId, address onBehalfOf, uint256 newNftFeeFactor) external whenStarted whenNotPaused auth {
+    function updateNftFee(bytes32 vaultId, address onBehalfOf, uint256 newNftFeeFactor,   uint256 realmId, uint8 v, bytes32 r, bytes32 s) external whenStarted whenNotPaused auth {
+        
+        //note: 50 RP needed to adjust fees
+        _checkAndBurnRp(50, realmId, v, r, s);
 
         // get vault + check if has been created
        (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
@@ -510,10 +511,13 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         // incoming NftFeeFactor must be more than current
         if(newNftFeeFactor <= vault.accounting.totalNftFeeFactor) revert Errors.NftFeeCanOnlyBeIncreased(vaultId);
 
-        emit NftFeeFactorUpdated(vaultId, vault.accounting.creatorFeeFactor, newNftFeeFactor);
+        //note: total fee cannot exceed 100%, which is defined as 1e18
+        uint256 totalFeeFactor = newNftFeeFactor + vault.accounting.creatorFeeFactor;
+        if(totalFeeFactor > 1e18) revert Errors.TotalFeeFactorExceeded();
+
+        emit NftFeeFactorUpdated(vaultId, vault.accounting.totalNftFeeFactor, newNftFeeFactor);
         
         // update Fee factor
-        vault.accounting.totalFeeFactor += newNftFeeFactor - vault.accounting.totalNftFeeFactor;
         vault.accounting.totalNftFeeFactor = newNftFeeFactor;
 
         // update storage
@@ -648,15 +652,6 @@ contract Pool is ERC20, Pausable, Ownable2Step {
                 // rewardsAccPerNFT
                 vault.accounting.vaultNftIndex += (accTotalNFTFee / vault.stakedNfts);
             }
-
-        } else { // no tokens staked: no fees. only bonusBall
-            
-            // calc. prior unbooked rewards 
-            accruedRewards = _calculateRewards(vault.allocPoints, pool_.poolIndex, vault.accounting.vaultIndex);
-
-            // rewards booked to bonusBall: incentive for 1st staker
-            vault.accounting.bonusBall += accruedRewards;
-            vault.accounting.totalAccRewards += accruedRewards;
         }
 
         // update vaultIndex
@@ -747,6 +742,19 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     ///@dev Generate a vaultId. keccak256 is cheaper than using a counter with a SSTORE, even accounting for eventual collision retries.
     function _generateVaultId(uint8 salt) internal view returns (bytes32) {
         return bytes32(keccak256(abi.encode(msg.sender, block.timestamp, salt)));
+    }
+
+    ///@dev Check a realmId's RP balance is sufficient; if so burn the required RP. Else revert
+    function _checkAndBurnRp(uint256 rpRequired, uint256 realmId, uint8 v, bytes32 r, bytes32 s) internal {
+        //note: rp check + burn + calc matching amount + revert if insufficient
+        // balanceOf(bytes32 season, uint256 realmId) || realmPoints precision: expressed in integers 
+        uint256 userRp = REALM_POINTS.balanceOf(season, realmId);
+        if (userRp < rpRequired) revert Errors.InsufficientRealmPoints(userRp, rpRequired);
+
+        // burn RP via signature
+        REALM_POINTS.consume(realmId, rpRequired, consumeReasonCode, v, r, s);
+        
+        emit RealmPointsBurnt(realmId, rpRequired);
     }
 
 //------------------------------------------------------------------------------

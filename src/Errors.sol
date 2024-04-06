@@ -28,9 +28,12 @@ library Errors {
 
     error InvalidEmissionParameters();
 
-    error CreatorFeeCanOnlyBeDecreased(bytes32 vaultId) ;
-    error NftFeeCanOnlyBeIncreased(bytes32 vaultId) ;
+    error CreatorFeeCanOnlyBeDecreased(bytes32 vaultId);
+    error NftFeeCanOnlyBeIncreased(bytes32 vaultId);
+    error TotalFeeFactorExceeded();
 
     error NftStakingLimitExceeded(bytes32 vaultId, uint256 currentNftAmount);
     error StakedTokenLimitExceeded(bytes32 vaultId, uint256 currentTokenAmount);
+
+    error InsufficientRealmPoints(uint256 currentRealmPoints, uint256 requiredRealmPoints);
 }
