@@ -77,10 +77,8 @@ contract DataTypes {
     struct UserInfo {
 
         // staked assets
-        uint256 stakedNfts;            
-        uint256 stakedTokens;   //refactor
-        // nfts staked: array.length < 4
-        uint256[] tokenIds;
+        uint256[] tokenIds;     // nfts staked: array.length < 4
+        uint256 stakedTokens;   
 
         // indexes
         uint256 userIndex; 

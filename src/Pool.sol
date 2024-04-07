@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.0;
+pragma solidity 0.8.22;
 
 import {Errors} from './Errors.sol';
 import {DataTypes} from './DataTypes.sol';
@@ -34,12 +34,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
     // token dp
     uint256 public constant PRECISION = 18;                       
-    
-    // multipliers
-    uint256 public constant nftMultiplier = 2;
-    uint256 public constant vault60Multiplier = 2;
-    uint256 public constant vault90Multiplier = 3;
-  
+      
     // timing
     uint256 public immutable startTime;           // start time
     uint256 public endTime;                       // non-immutable: allow extension staking period
@@ -56,11 +51,19 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     bytes32 public constant season = hex"01"; 
     bytes32 public constant consumeReasonCode = hex"01";
 
+    // vault multipliers: applied onto token values
+    uint256 public constant VAULT_30D_MULTIPLIER = 100;     // 1.0x
+    uint256 public constant VAULT_60D_MULTIPLIER = 125;     // 1.25x
+    uint256 public constant VAULT_90D_MULTIPLIER = 150;     // 1.5x   
+
+    // nft 
+    uint256 public constant MAX_NFTS_PER_VAULT = 3; 
+    uint256 public constant NFT_MULTIPLIER = 250;           // 2.5x multiplier 
+
     //increments
     uint256 public constant MOCA_INCREMENT_PER_RP = 800 ether;    
 
-    // staking limits
-    uint256 public constant MAX_NFTS_PER_VAULT = 3; 
+    // token
     uint256 public constant BASE_MOCA_STAKING_LIMIT = 200_000 ether;    // on vault creation, starting value
     uint256 public constant MAX_MOCA_PER_VAULT = 1_000_000 ether;        //note: placeholder value
  
@@ -156,7 +159,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     function createFreeVault() external whenStarted whenNotPaused onlyOwner {}
 
     ///@dev creates empty vault
-    function createVault(address onBehalfOf, uint8 salt, DataTypes.VaultDuration duration, uint256 creatorFee, uint256 nftFee,  uint256 realmId, uint8 v, bytes32 r, bytes32 s) external whenStarted whenNotPaused auth {
+    function createVault(address onBehalfOf, DataTypes.VaultDuration duration, uint256 creatorFee, uint256 nftFee,  uint256 realmId, uint8 v, bytes32 r, bytes32 s) external whenStarted whenNotPaused auth {
         //note: placeholder. rp check + call consume
         uint256 rpRequired;
         _checkAndBurnRp(rpRequired, realmId, v, r, s);
@@ -167,10 +170,15 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         // period check
         uint256 vaultEndTime = block.timestamp + (30 days * uint8(duration));           //duration: 30,60,90
         if (endTime <= vaultEndTime) revert Errors.InsufficientTimeLeft();
+        
+        bytes32 vaultId;
+        {
+           // vaultId generation
+            uint256 salt = block.number - 1;
+            vaultId = _generateVaultId(salt);
+            while (vaults[vaultId].vaultId != bytes32(0)) vaultId = _generateVaultId(--salt);      // If vaultId exists, generate new random Id
+        }
 
-        // vaultId generation
-        bytes32 vaultId = _generateVaultId(salt);
-        while (vaults[vaultId].vaultId != bytes32(0)) vaultId = _generateVaultId(++salt);      // If vaultId exists, generate new random Id
 
         // update poolIndex: book prior rewards, based on prior alloc points 
         (DataTypes.PoolAccounting memory pool_, ) = _updatePoolIndex();
@@ -181,7 +189,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
             vault.creator = onBehalfOf;
             vault.duration = duration;
             vault.endTime = vaultEndTime; 
-            vault.multiplier = uint8(duration); 
+            vault.multiplier = uint8(duration) == 3 ? VAULT_90D_MULTIPLIER : (uint8(duration) == 2 ? VAULT_60D_MULTIPLIER : VAULT_30D_MULTIPLIER);
             vault.stakedTokensLimit = BASE_MOCA_STAKING_LIMIT;                   //note: placeholder
             
             // index
@@ -240,10 +248,10 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     // Note: reset NFT assoc via recordUnstake()
     // else users cannot switch nfts to the new pool.
     function stakeNfts(bytes32 vaultId, address onBehalfOf, uint256[] calldata tokenIds) external whenStarted whenNotPaused auth {
-        uint256 arrLength = tokenIds.length;
+        uint256 incomingNfts = tokenIds.length;
 
         // usual blah blah checks
-        require(arrLength > 0 && arrLength < MAX_NFTS_PER_VAULT, "Invalid amount"); 
+        require(incomingNfts > 0 && incomingNfts < MAX_NFTS_PER_VAULT, "Invalid amount"); 
         require(vaultId > 0, "Invalid vaultId");
 
         // get vault + check if has been created
@@ -254,28 +262,26 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
         // sanity checks: if vault matured, no staking | new nft staked amount cannot exceed limit
         if(vault.endTime <= block.timestamp) revert Errors.VaultMatured(vaultId);            
-        if(vault.stakedNfts + arrLength > MAX_NFTS_PER_VAULT) revert Errors.NftStakingLimitExceeded(vaultId, vault.stakedNfts);
+        if(vault.stakedNfts + incomingNfts > MAX_NFTS_PER_VAULT) revert Errors.NftStakingLimitExceeded(vaultId, vault.stakedNfts);
 
         // update user & book 1st stake incentive
-        userInfo.stakedNfts += arrLength;
         userInfo.tokenIds = _concatArrays(userInfo.tokenIds, tokenIds);
         if(vault.stakedNfts == 0) {
             userInfo.accNftStakingRewards = vault.accounting.accNftStakingRewards;
             emit NftFeesAccrued(onBehalfOf, userInfo.accNftStakingRewards);
         }
 
-        // calc. delta
+        // cache
         uint256 oldMultiplier = vault.multiplier;
         uint256 oldAllocPoints = vault.allocPoints;
         
         // update vault
-        vault.stakedNfts += arrLength;
-        vault.multiplier += arrLength * nftMultiplier;
+        vault.stakedNfts += incomingNfts;
+        vault.multiplier += incomingNfts * NFT_MULTIPLIER;
 
         //calc. new alloc points | there is only impact if vault has prior stakedTokens
         if(vault.stakedTokens > 0) {
-            uint256 newAllocPoints = vault.stakedTokens * vault.multiplier;
-            uint256 deltaAllocPoints = newAllocPoints - oldAllocPoints;
+            uint256 deltaAllocPoints = (vault.stakedTokens * vault.multiplier) - oldAllocPoints;
             
             // update allocPoints
             vault.allocPoints += deltaAllocPoints;
@@ -370,25 +376,22 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         // get vault + check if has been created
        (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
 
-        // check if vault has matured
-        if(block.timestamp < vault_.endTime) revert Errors.VaultNotMatured(vaultId);
-        if(userInfo_.stakedTokens == 0 && userInfo_.stakedNfts == 0) revert Errors.UserHasNothingStaked(vaultId, onBehalfOf);
-
-        // revert if 0 balances of tokens or nfts?
-        // if(userInfo_.stakedNfts < 0 || userInfo_.stakedTokens) revert 
-
         // update indexes and book all prior rewards
         (DataTypes.UserInfo memory userInfo, DataTypes.Vault memory vault) = _updateUserIndexes(onBehalfOf, userInfo_, vault_);
 
-        //get user balances
-        uint256 stakedNfts = userInfo.stakedNfts;
+        //get user holdings
+        uint256 stakedNfts = userInfo.tokenIds.length;
         uint256 stakedTokens = userInfo.stakedTokens;
 
-        // update allocPoints
-        pool.totalAllocPoints -= vault.allocPoints;       // update storage: pool
-        vault.allocPoints = 0;
+        // check if vault has matured + user has non-zero holdings
+        if(block.timestamp < vault.endTime) revert Errors.VaultNotMatured(vaultId);
+        if(stakedTokens == 0 && stakedNfts == 0) revert Errors.UserHasNothingStaked(vaultId, onBehalfOf);
 
-        //note:  reset multiplier?
+        // decrement allocPoints
+        pool.totalAllocPoints -= vault.allocPoints;       // update storage: pool
+        delete vault.allocPoints;
+
+        //note:  reset multiplier? or leave it for record keeping?
         // vault.multiplier = 1;
 
         //update balances: user + vault
@@ -399,8 +402,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
             emit UnstakedMocaNft(onBehalfOf, vaultId, userInfo.tokenIds);       
 
             // update vault and user
-            vault.stakedNfts -= userInfo.stakedNfts;
-            delete userInfo.stakedNfts;
+            vault.stakedNfts -= stakedNfts;
             delete userInfo.tokenIds;
         }
 
@@ -685,11 +687,12 @@ contract Pool is ERC20, Pausable, Ownable2Step {
             }
         }
 
-        if(userInfo.stakedNfts > 0) {
+        uint256 userStakedNfts = userInfo.tokenIds.length;
+        if(userStakedNfts > 0) {
             if(userInfo.userNftIndex != newUserNftIndex){
 
                 // total accrued rewards from staking NFTs
-                uint256 accNftStakingRewards = (newUserNftIndex - userInfo.userNftIndex) * userInfo.stakedNfts;
+                uint256 accNftStakingRewards = (newUserNftIndex - userInfo.userNftIndex) * userStakedNfts;
                 userInfo.accNftStakingRewards += accNftStakingRewards;
                 emit NftFeesAccrued(user, accNftStakingRewards);
             }
@@ -740,7 +743,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
 
     ///@dev Generate a vaultId. keccak256 is cheaper than using a counter with a SSTORE, even accounting for eventual collision retries.
-    function _generateVaultId(uint8 salt) internal view returns (bytes32) {
+    function _generateVaultId(uint256 salt) internal view returns (bytes32) {
         return bytes32(keccak256(abi.encode(msg.sender, block.timestamp, salt)));
     }
 
@@ -856,17 +859,14 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         // get vault + check if has been created
        (DataTypes.UserInfo memory userInfo, DataTypes.Vault memory vault) = _cache(vaultId, onBehalfOf);
 
+        //get user balances
+        uint256 stakedNfts = userInfo.tokenIds.length;
+        uint256 stakedTokens = userInfo.stakedTokens;
+
         // check if vault has matured
         if(vault.endTime < block.timestamp) revert Errors.VaultNotMatured(vaultId); 
-        if(userInfo.stakedNfts == 0 || userInfo.stakedNfts == 0) revert Errors.UserHasNothingStaked(vaultId, onBehalfOf);
-
-        // revert if 0 balances of tokens or nfts?
-        // if(userInfo_.stakedNfts < 0 || userInfo_.stakedTokens) revert 
-
-        //get user balances
-        uint256 stakedNfts = userInfo.stakedNfts;
-        uint256 stakedTokens = userInfo.stakedTokens;
-        
+        if(stakedNfts == 0 && stakedTokens == 0) revert Errors.UserHasNothingStaked(vaultId, onBehalfOf);
+       
         //update balances: user + vault
         if(stakedNfts > 0){
 
@@ -876,13 +876,12 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
             // update vault and user
             vault.stakedNfts -= stakedNfts;
-            delete userInfo.stakedNfts;
             delete userInfo.tokenIds;
         }
 
         if(stakedTokens > 0){
             vault.stakedTokens -= stakedTokens;
-            userInfo.stakedNfts -= stakedTokens;
+            delete userInfo.stakedTokens;
             
             // burn stkMOCA
             _burn(onBehalfOf, stakedTokens);

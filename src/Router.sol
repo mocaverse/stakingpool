@@ -18,7 +18,6 @@ contract Router {
     constructor(address mocaToken, address pool){
         STAKED_TOKEN = mocaToken;
         POOL = pool;
-
     }
 
 
@@ -53,6 +52,18 @@ contract Router {
 
     }
 
+    ///@dev Check a realmId's RP balance is sufficient; if so burn the required RP. Else revert
+    function checkAndBurnRp(uint256 rpRequired, uint256 realmId, uint8 v, bytes32 r, bytes32 s) internal {
+        //note: rp check + burn + calc matching amount + revert if insufficient
+        // balanceOf(bytes32 season, uint256 realmId) || realmPoints precision: expressed in integers 
+        uint256 userRp = REALM_POINTS.balanceOf(season, realmId);
+        if (userRp < rpRequired) revert Errors.InsufficientRealmPoints(userRp, rpRequired);
+
+        // burn RP via signature
+        REALM_POINTS.consume(realmId, rpRequired, consumeReasonCode, v, r, s);
+        
+        emit RealmPointsBurnt(realmId, rpRequired);
+    }
 }
 
 
