@@ -119,10 +119,13 @@ abstract contract StateZero is Test {
         mocaToken.approve(address(rewardsVault), rewards); 
         rewardsVault.deposit(owner, rewards);
 
-        // IERC20 stakedToken, IERC20 rewardToken, address realmPoints, address rewardsVault, address registry,
-        // uint256 startTime_, uint256 duration, uint256 rewards
-        // string memory name, string memory symbol, address owner
-        stakingPool = new MockPool(IERC20(mocaToken), IERC20(mocaToken), address(0), address(rewardsVault), address(0), startTime, duration, rewards, "stkMOCA", "stkMOCA", owner);
+        /**
+            IERC20 stakedToken, IERC20 rewardToken, address rewardsVault, address registry, 
+            uint256 startTime_, uint256 duration, uint256 rewards,
+            string memory name, string memory symbol, address owner)
+        */
+        stakingPool = new MockPool(IERC20(mocaToken), IERC20(mocaToken), address(rewardsVault), address(0), startTime, duration, rewards, "stkMOCA", "stkMOCA", owner);
+
         //set router
         stakingPool.setRouter(router);
 
@@ -197,7 +200,6 @@ contract StateZeroTest is StateZero {
 
         vm.expectRevert("Not started");
         
-        uint8 salt = 1;
         uint256 creatorFee = 0.10 * 1e18;
         uint256 nftFee = 0.10 * 1e18;
 

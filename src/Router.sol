@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
+import {Errors} from './Errors.sol';
 import {IPool} from "./interfaces/IPool.sol";
+import {IMocaPoints} from "./interfaces/IMocaPoints.sol";
 import {RevertMsgExtractor} from "./utils/RevertMsgExtractor.sol";
-import {SafeERC20, IERC20} from "./../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 
+import {SafeERC20, IERC20} from "./../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20Permit} from "lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
 //note: inherit forwarder stuff
@@ -13,11 +15,30 @@ contract Router {
     using SafeERC20 for IERC20;
 
     address public STAKED_TOKEN;  
-    address public POOL;
 
-    constructor(address mocaToken, address pool){
+    IPool public POOL;
+    IMocaPoints public immutable REALM_POINTS;
+
+// ------- [note: need to confirm values] -------------------
+
+    //increments
+    uint256 public constant MOCA_INCREMENT_PER_RP = 800 * 1e18;    
+    
+    // realm points 
+    bytes32 public constant season = hex"01"; 
+    bytes32 public constant consumeReasonCode = hex"01";
+
+//-------------------------------Events---------------------------------------------
+
+    // events
+    event RealmPointsBurnt(uint256 realmId, uint256 rpBurnt);
+
+//------------------------------- fns -------------------------------------------
+
+    constructor(address mocaToken, address pool, address realmPoints){
         STAKED_TOKEN = mocaToken;
-        POOL = pool;
+        POOL = IPool(pool);
+        REALM_POINTS = IMocaPoints(realmPoints);
     }
 
 
@@ -52,8 +73,41 @@ contract Router {
 
     }
 
+    // increase limit by the amount param. 
+    // RP required = 50 + X. X goes towards calc. staking increment. 50 is a base charge.
+    function increaseVaultLimit(bytes32 vaultId, address onBehalfOf, uint256 amount, uint256 realmId, uint8 v, bytes32 r, bytes32 s) external {
+        require(amount > MOCA_INCREMENT_PER_RP, "Invalid increment");
+
+        // calc. RP required. fee charge: 50 RP, every RP thereafter contributes to incrementing the limit
+        // division involves rounding down
+        uint256 rpRequired = (amount / MOCA_INCREMENT_PER_RP) + 50;
+        _checkAndBurnRp(rpRequired, realmId, v, r, s);
+
+        uint256 limitIncrement = (rpRequired * MOCA_INCREMENT_PER_RP);
+        POOL.increaseVaultLimit(vaultId, onBehalfOf, limitIncrement);
+
+    }
+
+    ///@notice Only allowed to reduce the creator fee factor
+    function updateCreatorFee(bytes32 vaultId, address onBehalfOf, uint256 newCreatorFeeFactor, uint256 realmId, uint8 v, bytes32 r, bytes32 s) external {
+        
+        //note: 50 RP needed to adjust fees
+        _checkAndBurnRp(50, realmId, v, r, s);
+
+        POOL.updateCreatorFee(vaultId, onBehalfOf, newCreatorFeeFactor);
+    }
+
+    function updateNftFee(bytes32 vaultId, address onBehalfOf, uint256 newCreatorFeeFactor, uint256 realmId, uint8 v, bytes32 r, bytes32 s) external {
+        
+        //note: 50 RP needed to adjust fees
+        _checkAndBurnRp(50, realmId, v, r, s);
+
+        POOL.updateNftFee(vaultId, onBehalfOf, newCreatorFeeFactor);
+    }
+
+
     ///@dev Check a realmId's RP balance is sufficient; if so burn the required RP. Else revert
-    function checkAndBurnRp(uint256 rpRequired, uint256 realmId, uint8 v, bytes32 r, bytes32 s) internal {
+    function _checkAndBurnRp(uint256 rpRequired, uint256 realmId, uint8 v, bytes32 r, bytes32 s) internal {
         //note: rp check + burn + calc matching amount + revert if insufficient
         // balanceOf(bytes32 season, uint256 realmId) || realmPoints precision: expressed in integers 
         uint256 userRp = REALM_POINTS.balanceOf(season, realmId);
@@ -72,50 +126,4 @@ Batch teh following
 1. create permit: message for user to sign - gives approval
 2. batch: permit sig verification, stake
 3. 
- */
-
-
- /**
- Gas-less Token Transfer - Code: https://www.youtube.com/watch?v=jYNnatXRsBs
-  */
-
-// sig is created on the FE. 
-// wb NFT chips?
-
-
-/**
-1) NFT registry does not issue erc20 token.
-    no. of nfts per user recorded in mapping
-    when user wishes to stake nft, router calls registry to check if there are available nfts
-    Once an nft is staked, registry must be updated by the stakingPool, to "lock" nfts
-     increment lockAmount
-     decrement availableAmount
-
-Since no tokens are used in this approach, users will not be able to "see" anything
-in their metamask wallet
-
-2) NFT registry issues erc20 token.
-    On locking the nFT on mainnet, registry issues bridgedNftToken to user, on polygon
-    user can stake bridgedNFTToken into stakingPool
-    on staking, user transfers bridgedNftToken to pool, and receives stkNftToken.
-
-    This means tt while registry can inherit bridgedNFTToken.
-    We will need a standalone erc20 token contract for stkNftToken.
-    stakinPool cannot inherit this, since it already inherits stkMocaToken.
-
-    registry mints user bridgedNFTToken
-    bridgedNFTToken transferred to stakingPool
-    - bridgedNFTToken must be freely mint/burn and transferable
-
-    stakinPool mints/burns stkNftToken
-    - stkNftToken can be non-transferable.
-
-bridgedNFTToken will need to be ERC20Permit, for gassless transfer on staking.
-
- */
-
-
-/**
-
-
  */

@@ -6,11 +6,11 @@ import "./../src/Pool.sol";
 contract MockPool is Pool {
 
     constructor(
-        IERC20 stakedToken, IERC20 rewardToken, address realmPoints, address rewardsVault, address registry, 
+        IERC20 stakedToken, IERC20 rewardToken, address rewardsVault, address registry, 
         uint256 startTime_, uint256 duration, uint256 rewards,
         string memory name, string memory symbol, address owner) payable 
         
-        Pool(stakedToken, rewardToken, realmPoints, rewardsVault, registry, 
+        Pool(stakedToken, rewardToken, rewardsVault, registry, 
         startTime_, duration, rewards,
         name, symbol, owner)
         {}

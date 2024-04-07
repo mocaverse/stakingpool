@@ -8,24 +8,20 @@ import {RevertMsgExtractor} from "./utils/RevertMsgExtractor.sol";
 import {ERC20} from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 import {SafeERC20, IERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 
-//accesscontrol
 import {Pausable} from "openzeppelin-contracts/contracts/utils/Pausable.sol";
 import {Ownable2Step, Ownable} from  "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
 
 // interfaces
 import {IRegistry} from "./interfaces/IRegistry.sol";
 import {IRewardsVault} from "./interfaces/IRewardsVault.sol";
-import {IMocaPoints} from "./interfaces/IMocaPoints.sol";
+//import {IMocaPoints} from "./interfaces/IMocaPoints.sol";
 
 //Note: inherit ERC20 to issue stkMOCA
 contract Pool is ERC20, Pausable, Ownable2Step { 
     using SafeERC20 for IERC20;
 
-    // rp contract interfaces, token interfaces,
-    IMocaPoints public immutable REALM_POINTS;
     IRegistry public immutable REGISTRY;
     IERC20 public immutable STAKED_TOKEN;  
-    
     IERC20 public immutable REWARD_TOKEN;
     IRewardsVault public immutable REWARDS_VAULT;
 
@@ -47,10 +43,6 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
 // ------- [note: need to confirm values] -------------------
 
-    // realm points 
-    bytes32 public constant season = hex"01"; 
-    bytes32 public constant consumeReasonCode = hex"01";
-
     // vault multipliers: applied onto token values
     uint256 public constant VAULT_30D_MULTIPLIER = 100;     // 1.0x
     uint256 public constant VAULT_60D_MULTIPLIER = 125;     // 1.25x
@@ -60,11 +52,8 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     uint256 public constant MAX_NFTS_PER_VAULT = 3; 
     uint256 public constant NFT_MULTIPLIER = 250;           // 2.5x multiplier 
 
-    //increments
-    uint256 public constant MOCA_INCREMENT_PER_RP = 800 ether;    
-
     // token
-    uint256 public constant BASE_MOCA_STAKING_LIMIT = 200_000 ether;    // on vault creation, starting value
+    uint256 public constant BASE_MOCA_STAKING_LIMIT = 200_000 ether;     // on vault creation, starting value
     uint256 public constant MAX_MOCA_PER_VAULT = 1_000_000 ether;        //note: placeholder value
  
 //-------------------------------Events---------------------------------------------
@@ -101,7 +90,6 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
     event VaultStakingLimitIncreased(bytes32 indexed vaultId, uint256 oldStakingLimit, uint256 indexed newStakingLimit);
 
-    event RealmPointsBurnt(uint256 realmId, uint256 rpBurnt);
 
 //-------------------------------mappings-------------------------------------------
 
@@ -115,7 +103,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
 
     constructor(
-        IERC20 stakedToken, IERC20 rewardToken, address realmPoints, address rewardsVault, address registry, 
+        IERC20 stakedToken, IERC20 rewardToken, address rewardsVault, address registry, 
         uint256 startTime_, uint256 duration, uint256 rewards,
         string memory name, string memory symbol, address owner) payable Ownable(owner) ERC20(name, symbol) {
     
@@ -126,7 +114,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         STAKED_TOKEN = stakedToken;
         REWARD_TOKEN = rewardToken;
 
-        REALM_POINTS = IMocaPoints(realmPoints);
+//        REALM_POINTS = IMocaPoints(realmPoints);
         REWARDS_VAULT = IRewardsVault(rewardsVault);
         REGISTRY = IRegistry(registry);
 
@@ -159,10 +147,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     function createFreeVault() external whenStarted whenNotPaused onlyOwner {}
 
     ///@dev creates empty vault
-    function createVault(address onBehalfOf, DataTypes.VaultDuration duration, uint256 creatorFee, uint256 nftFee,  uint256 realmId, uint8 v, bytes32 r, bytes32 s) external whenStarted whenNotPaused auth {
-        //note: placeholder. rp check + call consume
-        uint256 rpRequired;
-        _checkAndBurnRp(rpRequired, realmId, v, r, s);
+    function createVault(address onBehalfOf, DataTypes.VaultDuration duration, uint256 creatorFee, uint256 nftFee) external whenStarted whenNotPaused auth {
 
         // invalid selection
         if(uint8(duration) == 0) revert Errors.InvalidVaultPeriod();      
@@ -427,14 +412,8 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     // increase limit by the amount param. 
     // vault staking limit cannot exceed global hard cap
     // RP required = 50 + X. X goes towards calc. staking increment. 50 is a base charge.
-    function increaseVaultLimit(bytes32 vaultId, address onBehalfOf, uint256 amount,  uint256 realmId, uint8 v, bytes32 r, bytes32 s) external whenStarted whenNotPaused auth {
+    function increaseVaultLimit(bytes32 vaultId, address onBehalfOf, uint256 amount) external whenStarted whenNotPaused auth {
         require(vaultId > 0, "Invalid vaultId");
-        require(amount > MOCA_INCREMENT_PER_RP, "Invalid increment");
-
-        // calc. RP required. fee charge: 50 RP, every RP thereafter contributes to incrementing the limit
-        // division involves rounding down
-        uint256 rpRequired = (amount / MOCA_INCREMENT_PER_RP) + 50;
-        _checkAndBurnRp(rpRequired, realmId, v, r, s);
         
         // get vault + check if has been created
         (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
@@ -448,7 +427,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     
         // increment limit 
         uint256 oldStakingLimit = vault.stakedTokensLimit;
-        vault.stakedTokensLimit = (rpRequired * MOCA_INCREMENT_PER_RP) + oldStakingLimit;
+        vault.stakedTokensLimit = amount + oldStakingLimit;
 
         // check that global hardcap is not exceeded
         if((vault.stakedTokensLimit) > MAX_MOCA_PER_VAULT) revert Errors.StakedTokenLimitExceeded(vaultId, vault.stakedTokens);
@@ -461,10 +440,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
     }
     
     ///@notice Only allowed to reduce the creator fee factor
-    function updateCreatorFee(bytes32 vaultId, address onBehalfOf, uint256 newCreatorFeeFactor,  uint256 realmId, uint8 v, bytes32 r, bytes32 s) external whenStarted whenNotPaused auth {
-        
-        //note: 50 RP needed to adjust fees
-        _checkAndBurnRp(50, realmId, v, r, s);
+    function updateCreatorFee(bytes32 vaultId, address onBehalfOf, uint256 newCreatorFeeFactor) external whenStarted whenNotPaused auth {
 
         // get vault + check if has been created
        (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
@@ -495,10 +471,7 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 
     ///@notice Only allowed to increase the nft fee factor
     ///@dev Creator decrements the totalNftFeeFactor, which is dividied up btw the various nft stakers
-    function updateNftFee(bytes32 vaultId, address onBehalfOf, uint256 newNftFeeFactor,   uint256 realmId, uint8 v, bytes32 r, bytes32 s) external whenStarted whenNotPaused auth {
-        
-        //note: 50 RP needed to adjust fees
-        _checkAndBurnRp(50, realmId, v, r, s);
+    function updateNftFee(bytes32 vaultId, address onBehalfOf, uint256 newNftFeeFactor) external whenStarted whenNotPaused auth {
 
         // get vault + check if has been created
        (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
@@ -747,19 +720,6 @@ contract Pool is ERC20, Pausable, Ownable2Step {
         return bytes32(keccak256(abi.encode(msg.sender, block.timestamp, salt)));
     }
 
-    ///@dev Check a realmId's RP balance is sufficient; if so burn the required RP. Else revert
-    function _checkAndBurnRp(uint256 rpRequired, uint256 realmId, uint8 v, bytes32 r, bytes32 s) internal {
-        //note: rp check + burn + calc matching amount + revert if insufficient
-        // balanceOf(bytes32 season, uint256 realmId) || realmPoints precision: expressed in integers 
-        uint256 userRp = REALM_POINTS.balanceOf(season, realmId);
-        if (userRp < rpRequired) revert Errors.InsufficientRealmPoints(userRp, rpRequired);
-
-        // burn RP via signature
-        REALM_POINTS.consume(realmId, rpRequired, consumeReasonCode, v, r, s);
-        
-        emit RealmPointsBurnt(realmId, rpRequired);
-    }
-
 //------------------------------------------------------------------------------
 
     /*//////////////////////////////////////////////////////////////
@@ -941,70 +901,3 @@ contract Pool is ERC20, Pausable, Ownable2Step {
 make getter fns:
  - get updated user state, wrt to rewards. cos it will be stale as per their last txn.
  */
-
-
-
- /**
-     function unstakeNfts(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused {
-        // usual blah blah checks
-        require(vaultId > 0, "Invalid vaultId");
-
-        // get vault + check if has been created
-       (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
-
-        // check if vault has matured
-        if(block.timestamp < vault_.endTime) revert Errors.VaultNotMatured(vaultId);
-        // revert if 0 balance
-        if(userInfo_.stakedNfts == 0) revert Errors.UserHasNoNftStaked(vaultId, onBehalfOf);
-
-        // update indexes and book all prior rewards
-        (DataTypes.UserInfo memory userInfo, DataTypes.Vault memory vault) = _updateUserIndexes(onBehalfOf, userInfo_, vault_);
-        
-        uint256 stakedNfts = userInfo.stakedNfts;
-
-        //update balances: user + vault
-        userInfo.stakedNfts = 0;
-        vault.stakedNfts -= stakedNfts;
-        
-        //_burn NFT chips?
-        emit UnstakedMocaNft(onBehalfOf, vaultId, stakedNfts);   
-
-        // return NFT chips
-        LOCKED_NFT_TOKEN.safeTransfer(onBehalfOf, stakedNfts);
-    }
-
-    function unstakeTokens(bytes32 vaultId, address onBehalfOf) external whenStarted whenNotPaused {
-        // usual blah blah checks
-        require(vaultId > 0, "Invalid vaultId");
-
-        // get vault + check if has been created
-       (DataTypes.UserInfo memory userInfo_, DataTypes.Vault memory vault_) = _cache(vaultId, onBehalfOf);
-
-        // check if vault has matured
-        if(block.timestamp < vault_.endTime) revert Errors.VaultNotMatured(vaultId);
-        // revert if 0 balance
-        if(userInfo_.stakedTokens == 0) revert Errors.UserHasNoTokenStaked(vaultId, onBehalfOf);
-
-        // update indexes and book all prior rewards
-        (DataTypes.UserInfo memory userInfo, DataTypes.Vault memory vault) = _updateUserIndexes(onBehalfOf, userInfo_, vault_);
-
-        //get user balances
-        uint256 stakedTokens = userInfo.stakedTokens;
-        
-        //update balances: user + vault
-        vault.stakedTokens -= stakedTokens;
-        userInfo.stakedNfts -= stakedTokens;
-        
-        // burn stkMOCA
-        _burn(onBehalfOf, stakedTokens);
-        emit UnstakedMoca(onBehalfOf, vaultId, stakedTokens);       
-    
-        // update storage
-        vaults[vaultId] = vault;
-        users[onBehalfOf][vaultId] = userInfo;
-
-        // return principal MOCA
-        STAKED_TOKEN.safeTransfer(onBehalfOf, stakedTokens); 
-    }
- 
-  */
