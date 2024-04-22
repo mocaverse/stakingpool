@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
+import {DataTypes} from 'src/DataTypes.sol';
+
 interface IPool {
 
     function createVault(address onBehalfOf, DataTypes.VaultDuration duration, uint256 creatorFeeFactor, uint256 nftFeeFactor) external;

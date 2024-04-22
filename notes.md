@@ -66,5 +66,5 @@
 
 # ROUTER
 
-- msg.sender in batching
+- msg.sender in batching <> trsuted forwarder
 - how to call consume for rp burn: owner

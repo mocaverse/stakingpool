@@ -1,27 +1,34 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.0;
+pragma solidity 0.8.22;
 
 import {Errors} from './Errors.sol';
+import {DataTypes} from './DataTypes.sol';
+
 import {IPool} from "./interfaces/IPool.sol";
 import {IRealmPoints} from "./interfaces/IRealmPoints.sol";
 import {RevertMsgExtractor} from "./utils/RevertMsgExtractor.sol";
 
 import {SafeERC20, IERC20} from "./../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IERC20Permit} from "lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
 //note: inherit forwarder stuff
 
 contract Router {
     using SafeERC20 for IERC20;
 
-    address public STAKED_TOKEN;  
-
+    
     IPool public POOL;
-    IMocaPoints public immutable REALM_POINTS;
+    IERC20 public immutable STAKED_TOKEN;  
+    IRealmPoints public immutable REALM_POINTS;
+
 
 // ------- [note: need to confirm values] -------------------
+    
+    // RP needed to create vaults
+    uint256 public constant RP_REQUIRED_VAULT_30 = 600;
+    uint256 public constant RP_REQUIRED_VAULT_60 = 500;
+    uint256 public constant RP_REQUIRED_VAULT_90 = 400;
 
-    //increments
+    // increments
     uint256 public constant MOCA_INCREMENT_PER_RP = 800 * 1e18;    
     
     // realm points 
@@ -33,12 +40,12 @@ contract Router {
     // events
     event RealmPointsBurnt(uint256 realmId, uint256 rpBurnt);
 
-//------------------------------- fns -------------------------------------------
+//------------------------------- constructor -------------------------------------------
 
-    constructor(address mocaToken, address pool, address realmPoints){
-        STAKED_TOKEN = mocaToken;
+    constructor(address mocaToken, address pool, address realmPoints) {
+        STAKED_TOKEN = IERC20(mocaToken);
         POOL = IPool(pool);
-        REALM_POINTS = IMocaPoints(realmPoints);
+        REALM_POINTS = IRealmPoints(realmPoints);
     }
 
 
@@ -55,27 +62,85 @@ contract Router {
         }
     }
 
+    /*//////////////////////////////////////////////////////////////
+                                 CREATE
+    //////////////////////////////////////////////////////////////*/
 
-    function stake(
-        bytes32 vaultId,
-        address token,
-        address owner,         // user
-        address spender,       // router
-        uint256 amount,        // amount of tokens
-        uint256 deadline,      // expiry
-        uint8 v, bytes32 r, bytes32 s) external {
-            
-        //1. permit: gain approval for stkMOCA frm user via sig
-        IERC20Permit(token).permit(owner, spender, amount, deadline, v, r, s);
-
-        //stake: router calls pool -> transferFrom 
-        IPool(spender).stakeTokens(vaultId, owner, amount);
-
+    ///@dev Calls createVault
+    function createVault(DataTypes.VaultDuration duration, uint256 creatorFeeFactor, uint256 nftFeeFactor, uint256 realmId, uint8 v, bytes32 r, bytes32 s) external {
+        
+        // burn RP
+        uint256 rpRequired = uint8(duration) == 3 ? RP_REQUIRED_VAULT_90 : (uint8(duration) == 2 ? RP_REQUIRED_VAULT_60 : RP_REQUIRED_VAULT_30);
+        _checkAndBurnRp(rpRequired, realmId, v, r, s);
+        
+        // call pool
+        POOL.createVault(msg.sender, duration, creatorFeeFactor, nftFeeFactor); 
     }
+
+    /*//////////////////////////////////////////////////////////////
+                                 STAKE
+    //////////////////////////////////////////////////////////////*/
+
+    ///@dev Calls stakeTokens
+    function stakeTokens(bytes32 vaultId, uint256 amount) external {
+        // call pool
+        POOL.stakeTokens(vaultId, msg.sender, amount);
+    }
+
+    ///@dev Calls stakeNfts
+    function stakeNfts(bytes32 vaultId, uint256[] calldata tokenIds) external {
+        // call pool
+        POOL.stakeNfts(vaultId, msg.sender, tokenIds);
+    }
+
+
+    /*//////////////////////////////////////////////////////////////
+                                 CLAIM
+    //////////////////////////////////////////////////////////////*/
+
+    ///@dev 
+    function claimFees(bytes32 vaultId) external {
+        POOL.claimFees(vaultId, msg.sender);
+    } 
+
+    function claimRewards(bytes32 vaultId) external {
+        POOL.claimRewards(vaultId, msg.sender);
+    } 
+
+
+    /*//////////////////////////////////////////////////////////////
+                                UNSTAKE
+    //////////////////////////////////////////////////////////////*/
+
+    function unstakeAll(bytes32 vaultId) external {
+        POOL.unstakeAll(vaultId, msg.sender);
+    }
+
+
+    /*//////////////////////////////////////////////////////////////
+                            FEES + LIMIT
+    //////////////////////////////////////////////////////////////*/
+
+    ///@notice Only allowed to increase nft fee factor
+    function updateNftFee(bytes32 vaultId, uint256 amount, uint256 realmId, uint8 v, bytes32 r, bytes32 s) external {
+        //note: 50 RP needed to adjust fees
+        _checkAndBurnRp(50, realmId, v, r, s);
+
+        POOL.updateNftFee(vaultId, msg.sender, amount);
+    }
+
+    ///@notice Only allowed to reduce the creator fee factor
+    function updateCreatorFee(bytes32 vaultId, uint256 amount, uint256 realmId, uint8 v, bytes32 r, bytes32 s) external {
+        //note: 50 RP needed to adjust fees
+        _checkAndBurnRp(50, realmId, v, r, s);
+
+        POOL.updateCreatorFee(vaultId, msg.sender, amount);
+    }
+
 
     // increase limit by the amount param. 
     // RP required = 50 + X. X goes towards calc. staking increment. 50 is a base charge.
-    function increaseVaultLimit(bytes32 vaultId, address onBehalfOf, uint256 amount, uint256 realmId, uint8 v, bytes32 r, bytes32 s) external {
+    function increaseVaultLimit(bytes32 vaultId, uint256 amount, uint256 realmId, uint8 v, bytes32 r, bytes32 s) external {
         require(amount > MOCA_INCREMENT_PER_RP, "Invalid increment");
 
         // calc. RP required. fee charge: 50 RP, every RP thereafter contributes to incrementing the limit
@@ -84,27 +149,12 @@ contract Router {
         _checkAndBurnRp(rpRequired, realmId, v, r, s);
 
         uint256 limitIncrement = (rpRequired * MOCA_INCREMENT_PER_RP);
-        POOL.increaseVaultLimit(vaultId, onBehalfOf, limitIncrement);
-
+        POOL.increaseVaultLimit(vaultId, msg.sender, limitIncrement);
     }
 
-    ///@notice Only allowed to reduce the creator fee factor
-    function updateCreatorFee(bytes32 vaultId, address onBehalfOf, uint256 newCreatorFeeFactor, uint256 realmId, uint8 v, bytes32 r, bytes32 s) external {
-        
-        //note: 50 RP needed to adjust fees
-        _checkAndBurnRp(50, realmId, v, r, s);
-
-        POOL.updateCreatorFee(vaultId, onBehalfOf, newCreatorFeeFactor);
-    }
-
-    function updateNftFee(bytes32 vaultId, address onBehalfOf, uint256 newCreatorFeeFactor, uint256 realmId, uint8 v, bytes32 r, bytes32 s) external {
-        
-        //note: 50 RP needed to adjust fees
-        _checkAndBurnRp(50, realmId, v, r, s);
-
-        POOL.updateNftFee(vaultId, onBehalfOf, newCreatorFeeFactor);
-    }
-
+    /*//////////////////////////////////////////////////////////////
+                                INTERNAL
+    //////////////////////////////////////////////////////////////*/
 
     ///@dev Check a realmId's RP balance is sufficient; if so burn the required RP. Else revert
     function _checkAndBurnRp(uint256 rpRequired, uint256 realmId, uint8 v, bytes32 r, bytes32 s) internal {
@@ -118,12 +168,7 @@ contract Router {
         
         emit RealmPointsBurnt(realmId, rpRequired);
     }
+
+
+
 }
-
-
-/**
-Batch teh following
-1. create permit: message for user to sign - gives approval
-2. batch: permit sig verification, stake
-3. 
- */

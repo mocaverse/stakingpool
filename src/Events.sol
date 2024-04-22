@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.22;
 
+import {DataTypes} from './DataTypes.sol';
+
 event DistributionUpdated(uint256 indexed newPoolEPS, uint256 indexed newEndTime);
 event RouterUpdated(address indexed oldRouter, address indexed newRouter);
 
