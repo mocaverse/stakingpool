@@ -16,7 +16,6 @@ library Errors {
     error InsufficientTimeLeft();
 
     error NonExistentVault(bytes32 vaultId);
-
     error UserIsNotVaultCreator(bytes32 vaultId, address user) ;
 
     error VaultMatured(bytes32 vaultId);
@@ -26,14 +25,17 @@ library Errors {
     error UserHasNoTokenStaked(bytes32 vaultId, address user);
     error UserHasNothingStaked(bytes32 vaultId, address user);
 
-    error InvalidEmissionParameters();
-
-    error CreatorFeeCanOnlyBeDecreased(bytes32 vaultId);
-    error NftFeeCanOnlyBeIncreased(bytes32 vaultId);
     error TotalFeeFactorExceeded();
-
+    error NftFeeCanOnlyBeIncreased(bytes32 vaultId);
+    error CreatorFeeCanOnlyBeDecreased(bytes32 vaultId);
+    
     error NftStakingLimitExceeded(bytes32 vaultId, uint256 currentNftAmount);
     error StakedTokenLimitExceeded(bytes32 vaultId, uint256 currentTokenAmount);
 
+    error InvalidEmissionParameters();
+
     error InsufficientRealmPoints(uint256 currentRealmPoints, uint256 requiredRealmPoints);
+
+    error VaultHasZeroStakedTokens();
+    error VaultHasZeroStakedNfts();
 }

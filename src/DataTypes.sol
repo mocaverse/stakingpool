@@ -13,12 +13,12 @@ contract DataTypes {
         uint256 emissisonPerSecond;           
     
         // rewards: y
-        uint256 poolIndex;                       // rewardsAccPerAllocPoint (to date) || rewards are booked into index
-        uint256 poolLastUpdateTimeStamp;  
+        uint256 index;                       // rewardsAccPerAllocPoint (to date) || rewards are booked into index
+        uint256 lastUpdateTimeStamp;  
         
         // for updating emissions
-        uint256 totalPoolRewards;                // prevent ddos rewards 
-        uint256 totalPoolRewardsEmitted;         // prevent ddos rewards vault
+        uint256 totalStakingRewards;       // total staking rewards for emission
+        uint256 rewardsEmitted;            // prevent ddos rewards vault
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -54,19 +54,18 @@ contract DataTypes {
         // index
         uint256 vaultIndex;             //rewardsAccPerAllocPoint
         uint256 vaultNftIndex;          //rewardsAccPerNFT
-        uint256 rewardsAccPerToken;
 
         // fees: pct values, with 18dp precision
         uint256 creatorFeeFactor;   
-        uint256 totalNftFeeFactor;       
+        uint256 nftFeeFactor;       
             
         // rewards | based on allocPoints
         uint256 totalAccRewards;
         uint256 accNftStakingRewards;
         uint256 accCreatorRewards;    
 
-        // total: staking, nft, creator
-        uint256 totalClaimedRewards;    
+        uint256 rewardsAccPerToken;
+        uint256 totalClaimedRewards;    // total: staking, nft, creator
     }
 
 
@@ -85,8 +84,8 @@ contract DataTypes {
         uint256 userNftIndex;
 
         //rewards: tokens (from staking tokens less of fees)
-        uint256 accStakingRewards;
-        uint256 claimedStakingRewards;
+        uint256 accStakingRewards;          // receivable      
+        uint256 claimedStakingRewards;      // received
 
         //rewards: NFTs
         uint256 accNftStakingRewards; 

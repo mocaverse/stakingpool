@@ -1,0 +1,53 @@
+{
+  "clientRemote": "",
+  "gitRemote": "",
+  "gitSha": "",
+  "treeEntries": [
+    {
+      "label": "limits may change to be based on duration",
+      "entryType": 0,
+      "author": "rjp",
+      "locations": [
+        {
+          "path": "src\\PoolAgain.sol",
+          "startLine": 149,
+          "endLine": 149,
+          "label": "",
+          "description": ""
+        }
+      ],
+      "details": {
+        "severity": "",
+        "difficulty": "",
+        "type": "",
+        "description": "",
+        "exploit": "",
+        "recommendation": "Short term, \nLong term, \n"
+      }
+    },
+    {
+      "label": "make adjustments based on confirmed nftMultiplier",
+      "entryType": 0,
+      "author": "rjp",
+      "locations": [
+        {
+          "path": "src\\PoolAgain.sol",
+          "startLine": 226,
+          "endLine": 226,
+          "label": "",
+          "description": ""
+        }
+      ],
+      "details": {
+        "severity": "",
+        "difficulty": "",
+        "type": "",
+        "description": "",
+        "exploit": "",
+        "recommendation": "Short term, \nLong term, \n"
+      }
+    }
+  ],
+  "auditedFiles": [],
+  "resolvedEntries": []
+}

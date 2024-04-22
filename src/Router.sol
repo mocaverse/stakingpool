@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 
 import {Errors} from './Errors.sol';
 import {IPool} from "./interfaces/IPool.sol";
-import {IMocaPoints} from "./interfaces/IMocaPoints.sol";
+import {IRealmPoints} from "./interfaces/IRealmPoints.sol";
 import {RevertMsgExtractor} from "./utils/RevertMsgExtractor.sol";
 
 import {SafeERC20, IERC20} from "./../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
